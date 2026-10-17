@@ -178,6 +178,7 @@ impl Optimizer {
                 Box::new(format_condenser::FormatCondenser),
                 Box::new(yaml_condenser::YamlCondenser),
                 Box::new(lines::Lines),
+                Box::new(dict::Dict),
             ],
             proposers_enabled: true,
             gate,
