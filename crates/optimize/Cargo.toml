@@ -25,6 +25,7 @@ tree-sitter-python = { version = "0.23", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["arbitrary_precision"] }
 serde_yaml = { workspace = true }
+toml = "0.9"
 
 [dev-dependencies]
 tiktoken-rs = { workspace = true }
