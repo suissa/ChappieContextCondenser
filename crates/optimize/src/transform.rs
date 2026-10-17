@@ -11,6 +11,13 @@ pub trait Transform {
     fn trusted(&self) -> bool {
         false
     }
+
+    /// Optional response-side inverse for transforms that intentionally change model-facing names.
+    /// The host passes the exact wire sent to the model and the model's JSON response; implementations
+    /// restore only aliases belonging to that wire. The default is no-op.
+    fn restore_response(&self, _wire: &str, _response_json: &str) -> Option<String> {
+        None
+    }
 }
 
 // Text codecs prove their reconstruction. The default is byte equality; semantic formats such as
