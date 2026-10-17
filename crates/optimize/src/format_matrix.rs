@@ -7,8 +7,11 @@ use crate::{
 };
 
 const COMPOSITE_HEADER: &str = "SFM1";
+const COMPOSITE_PREFIX: &str = "SFM1\n";
 const DICT_COMPOSITE_HEADER: &str = "SFM1D";
+const DICT_COMPOSITE_PREFIX: &str = "SFM1D\n";
 const STACK_HEADER: &str = "SFM2";
+const STACK_PREFIX: &str = "SFM2\n";
 
 /// Best-of-N text format matrix. Semantic codecs are attempted for JSON/TOML/YAML; reversible
 /// repeated-line and repeated-token dictionaries cover CSV, XML, HTML, Markdown, source, logs,
@@ -170,7 +173,7 @@ impl TextProposer for FormatMatrix {
 ')?;
             return decode_stack(chain, body);
         }
-        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\n")) {
+        if let Some(rest) = wire.strip_prefix(DICT_COMPOSITE_PREFIX) {
             let (id, outer) = rest.split_once('\n')?;
             let inner_wire = dict::decode(outer)?;
             return match id {
@@ -179,7 +182,7 @@ impl TextProposer for FormatMatrix {
                 _ => None,
             };
         }
-        if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\n")) {
+        if let Some(rest) = wire.strip_prefix(COMPOSITE_PREFIX) {
             let (id, outer) = rest.split_once('\n')?;
             let inner_wire = lines::decode(outer)?;
             return match id {
