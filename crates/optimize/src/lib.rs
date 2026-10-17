@@ -525,9 +525,8 @@ impl Optimizer {
         (best, refusal)
     }
 
-    // Readable inline text codecs ship first: grouped (grep by file, listings by directory) and tree
-    // (box-drawing dep trees as indentation). Both read at face value. Everything else has no readable
-    // inline codec: a host proposer may ship (it owns its readability), else evict/verbatim.
+    // Compare the readable legacy codecs and every built-in/host proposer in one token-priced pool.
+    // Format-aware codecs may prove semantic equality; generic dictionaries prove byte-exact equality.
     fn compress_text(&mut self, raw: &str) -> Outcome {
         let mut best: Option<(String, &'static str, f64, usize)> = None;
 
@@ -619,8 +618,8 @@ impl Optimizer {
         }
     }
 
-    // Best-of-N over the text proposers, keeping only candidates whose own decode reproduces the block
-    // (reckless-safe per-instance proof) and clear price + detector. Deterministic tie-break so the wire is stable.
+    // Best-of-N over text proposers. Each candidate must pass its codec's byte-exact or semantic
+    // verifier, the price gate, and detector checks. Deterministic ties keep the selected wire stable.
     fn best_proposer(&mut self, raw: &str) -> Option<(String, &'static str, f64, usize)> {
         if !self.proposers_enabled {
             return None;
