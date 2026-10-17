@@ -29,6 +29,7 @@ secondwind-tap = { path = "crates/tap" }
 blake3 = "1"
 tiktoken-rs = "0.6"
 tiny_http = "0.12"
+serde_yaml = "0.9"
 # gzip stays off so the proxy streams replies raw, byte-for-byte.
 ureq = { version = "2", default-features = false, features = ["tls"] }
 # Async proxy stack: one listener serving HTTP and the WebSocket upgrade Codex
