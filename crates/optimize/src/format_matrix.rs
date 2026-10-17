@@ -19,25 +19,25 @@ impl FormatMatrix {
     fn candidates(raw: &str) -> Vec<String> {
         let mut candidates: Vec<(String, &'static str)> = Vec::new();
 
-        if let Some(wire) = FormatCondenser.encode(raw) {
-            if FormatCondenser.verify(raw, &wire) {
-                candidates.push((wire, "format-condenser"));
-            }
+        if let Some(wire) = FormatCondenser.encode(raw)
+            && FormatCondenser.verify(raw, &wire)
+        {
+            candidates.push((wire, "format-condenser"));
         }
-        if let Some(wire) = YamlCondenser::encode(raw) {
-            if YamlCondenser::verify(raw, &wire) {
-                candidates.push((wire, "yaml-condenser"));
-            }
+        if let Some(wire) = YamlCondenser::encode(raw)
+            && YamlCondenser::verify(raw, &wire)
+        {
+            candidates.push((wire, "yaml-condenser"));
         }
-        if let Some(wire) = lines::encode(raw) {
-            if lines::decode(&wire).as_deref() == Some(raw) {
-                candidates.push((wire, "lines"));
-            }
+        if let Some(wire) = lines::encode(raw)
+            && lines::decode(&wire).as_deref() == Some(raw)
+        {
+            candidates.push((wire, "lines"));
         }
-        if let Some(wire) = dict::encode(raw) {
-            if dict::decode(&wire).as_deref() == Some(raw) {
-                candidates.push((wire, "dict"));
-            }
+        if let Some(wire) = dict::encode(raw)
+            && dict::decode(&wire).as_deref() == Some(raw)
+        {
+            candidates.push((wire, "dict"));
         }
 
         // Composition candidates are independently verified; the optimizer prices all candidates
