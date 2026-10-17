@@ -169,9 +169,9 @@ impl Optimizer {
         let counter: Arc<dyn TokenCounter> = Arc::new(ByteCounter);
         Self {
             transforms: Self::built_in_transforms(counter.clone()),
-            // Built-in text codecs are unreadable inline; only host-registered proposers ship here,
-            // and a host owns its codec's readability. See compress_text.
-            text_proposers: Vec::new(),
+            // SWY1 is a documented, semantic YAML wire format. It is a built-in candidate,
+            // but it is shipped only when its full header + dictionary + body beats the raw text.
+            text_proposers: vec![Box::new(yaml_condenser::YamlCondenser)],
             proposers_enabled: true,
             gate,
             zone,
@@ -609,8 +609,8 @@ impl Optimizer {
             let Some(wire) = self.text_proposers[i].encode(raw) else {
                 continue;
             };
-            if self.text_proposers[i].decode(&wire).as_deref() != Some(raw) {
-                continue; // reckless proposal that does not round-trip: dropped, never shipped
+            if !self.text_proposers[i].verify(raw, &wire) {
+                continue; // byte-exact by default; semantic codecs may override with a proof
             }
             let Verdict::Save { usd } = self.priced(raw, &wire) else {
                 continue;
@@ -921,6 +921,19 @@ mod tests {
             parse + dup + enc + adm + price + det
         );
         eprintln!("  full compress_block       {full:>7.1}");
+    }
+
+    #[test]
+    fn yaml_semantic_verifier_is_used_by_the_default_proposer_pipeline() {
+        let raw = include_str!("../../../examples/docker-compose.before.yml");
+        let mut optimizer = Optimizer::default();
+        let Some((wire, id, _, _)) = optimizer.best_proposer(raw) else {
+            panic!("the default YAML proposer should accept a semantically verified fixture");
+        };
+        assert_eq!(id, "yaml-condenser");
+        assert!(wire.starts_with("SWY1\\n"));
+        assert!(yaml_condenser::YamlCondenser::verify(raw, &wire));
+        assert_ne!(yaml_condenser::YamlCondenser::decode(&wire).as_deref(), Some(raw));
     }
 
     // A host-supplied codec that only fires on a long single-character run. Lossless by construction.
