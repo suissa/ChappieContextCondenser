@@ -188,7 +188,7 @@ Drop-in, in-process, lossless. Each is a couple of lines; the binding READMEs ca
 One import and one wrap. Your framework's tool outputs compress losslessly on the way to the
 model, and pass through untouched when they will not shrink.
 
-### Bring your own codec
+### VariablesSimplifier (JSON key aliases)\n\nThe optimizer also tests a deterministic `variables-simplifier` codec that assigns short (up to three-character) aliases to JSON object keys and includes a reversible dictionary. It is selected only when the normal proof and net-cost gates pass; the dictionary overhead means it is not beneficial for every object. See [docs/VARIABLES_SIMPLIFIER.md](docs/VARIABLES_SIMPLIFIER.md) for the wire format, limits, and tests. This operates on JSON keys, not arbitrary source-code identifiers, and does not rewrite model responses.\n\n### Bring your own codec
 
 The library runs a proof-gated best-of-N codec search, and you can add your own codec to it. It
 competes with the built-ins and is proven `decode(encode(x)) == x` per block, so a wrong or reckless
