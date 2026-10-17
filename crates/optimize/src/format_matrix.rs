@@ -345,8 +345,8 @@ active,active,active
             assert!(c.verify(raw, &wire));
             assert_eq!(c.decode(&wire).as_deref(), Some(raw));
         }
-        let stack = encode_stack(raw, "lines,dict").unwrap();
-        assert!(verify_stack(raw, "lines,dict", &stack));
+        let stack = encode_stack(raw, "dict,lines").unwrap();
+        assert!(verify_stack(raw, "dict,lines", &stack));
     }
 
     #[test]
