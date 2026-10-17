@@ -537,16 +537,25 @@ impl Optimizer {
             ("tree", tree::encode(raw)),
             ("lock", lock::encode(raw)),
         ] {
-            let Some(wire) = candidate else { continue };
-            let Verdict::Save { usd } = self.priced(raw, &wire) else { continue };
-            if !detectorgate::detector_findings(raw, &wire).is_empty() { continue; }
+            let Some(wire) = candidate else {
+                continue;
+            };
+            let Verdict::Save { usd } = self.priced(raw, &wire) else {
+                continue;
+            };
+            if !detectorgate::detector_findings(raw, &wire).is_empty() {
+                continue;
+            }
             let units = self.units(&wire);
             let better = match &best {
-                Some((bw, bid, _, bu)) => units < *bu
-                    || (units == *bu && (id, wire.as_str()) < (*bid, bw.as_str())),
+                Some((bw, bid, _, bu)) => {
+                    units < *bu || (units == *bu && (id, wire.as_str()) < (*bid, bw.as_str()))
+                }
                 None => true,
             };
-            if better { best = Some((wire, id, usd, units)); }
+            if better {
+                best = Some((wire, id, usd, units));
+            }
         }
 
         if let Some(candidate) = self.best_proposer(raw) {
@@ -556,7 +565,9 @@ impl Optimizer {
                     || (units == *bu && (id, wire.as_str()) < (*bid, bw.as_str())),
                 None => true,
             };
-            if better { best = Some((wire, id, usd, units)); }
+            if better {
+                best = Some((wire, id, usd, units));
+            }
         }
 
         if let Some((wire, id, usd, _)) = best {
