@@ -46,7 +46,7 @@ fewer tokens.
 - **Middleware**: drop-in adapters for LangChain, LangGraph, Agno, Strands, Cursor, LiteLLM, the
   Vercel AI SDK, and ASGI ([Adapters](#framework-adapters)).
 
-Same lossless-and-proven core in all three.
+Same lossless-and-proven core in all three. See [format-specific condensation and proof boundaries](docs/FORMAT_CONDENSERS.md) for the built-in JSON/YAML/TOML codecs, generic CSV/XML/HTML/Markdown/source/log strategies, and best-of-N composition.
 
 ## Install
 

@@ -16,6 +16,8 @@ pub mod dict;
 pub mod distilled;
 pub mod doc;
 pub mod frontier;
+pub mod format_condenser;
+pub mod format_matrix;
 pub mod frontlines;
 pub mod grouped;
 pub mod kv;
@@ -169,9 +171,15 @@ impl Optimizer {
         let counter: Arc<dyn TokenCounter> = Arc::new(ByteCounter);
         Self {
             transforms: Self::built_in_transforms(counter.clone()),
-            // Built-in text codecs are unreadable inline; only host-registered proposers ship here,
-            // and a host owns its codec's readability. See compress_text.
-            text_proposers: Vec::new(),
+            // Built-in semantic and reversible text candidates. The optimizer evaluates all
+            // candidates using its configured token counter and shared admission gates.
+            text_proposers: vec![
+                Box::new(format_matrix::FormatMatrix),
+                Box::new(format_condenser::FormatCondenser),
+                Box::new(yaml_condenser::YamlCondenser),
+                Box::new(lines::Lines),
+                Box::new(dict::Dict),
+            ],
             proposers_enabled: true,
             gate,
             zone,
@@ -517,38 +525,61 @@ impl Optimizer {
         (best, refusal)
     }
 
-    // Readable inline text codecs ship first: grouped (grep by file, listings by directory) and tree
-    // (box-drawing dep trees as indentation). Both read at face value. Everything else has no readable
-    // inline codec: a host proposer may ship (it owns its readability), else evict/verbatim.
+    // Compare the readable legacy codecs and every built-in/host proposer in one token-priced pool.
+    // Format-aware codecs may prove semantic equality; generic dictionaries prove byte-exact equality.
     fn compress_text(&mut self, raw: &str) -> Outcome {
-        for (id, wire) in [
+        let mut best: Option<(String, &'static str, f64, usize)> = None;
+
+        // Evaluate readable built-ins and every text proposer in one best-of-N pool. Selection
+        // uses the configured tokenizer, not byte length, and every candidate passes the same gates.
+        for (id, candidate) in [
             ("grouped", grouped::encode(raw)),
             ("tree", tree::encode(raw)),
             ("lock", lock::encode(raw)),
         ] {
-            if let Some(wire) = wire
-                && let Some(outcome) = self.try_text_codec(raw, id, wire)
-            {
-                return outcome;
+            let Some(wire) = candidate else {
+                continue;
+            };
+            let Verdict::Save { usd } = self.priced(raw, &wire) else {
+                continue;
+            };
+            if !detectorgate::detector_findings(raw, &wire).is_empty() {
+                continue;
+            }
+            let units = self.units(&wire);
+            let better = match &best {
+                Some((bw, bid, _, bu)) => {
+                    units < *bu || (units == *bu && (id, wire.as_str()) < (*bid, bw.as_str()))
+                }
+                None => true,
+            };
+            if better {
+                best = Some((wire, id, usd, units));
             }
         }
-        self.try_proposers(raw)
-    }
 
-    fn try_text_codec(&mut self, raw: &str, id: &'static str, wire: String) -> Option<Outcome> {
-        let Verdict::Save { usd } = self.priced(raw, &wire) else {
-            return None;
-        };
-        if !detectorgate::detector_findings(raw, &wire).is_empty() {
-            return None;
+        if let Some(candidate) = self.best_proposer(raw) {
+            let (wire, id, usd, units) = candidate;
+            let better = match &best {
+                Some((bw, bid, _, bu)) => units < *bu
+                    || (units == *bu && (id, wire.as_str()) < (*bid, bw.as_str())),
+                None => true,
+            };
+            if better {
+                best = Some((wire, id, usd, units));
+            }
         }
-        let certificate = Certificate {
-            clmh_before: clmh::Clmh::default(),
-            clmh_after: clmh::Clmh::default(),
-            canonical_bytes: raw.len(),
-            wire_bytes: wire.len(),
-        };
-        Some(self.ship_inline_or_offload(raw, wire, id, certificate, usd))
+
+        if let Some((wire, id, usd, _)) = best {
+            let certificate = Certificate {
+                clmh_before: clmh::Clmh::default(),
+                clmh_after: clmh::Clmh::default(),
+                canonical_bytes: raw.len(),
+                wire_bytes: wire.len(),
+            };
+            return self.ship_inline_or_offload(raw, wire, id, certificate, usd);
+        }
+        self.try_offload(raw)
     }
 
     // Whether recoverable eviction should be taken for this block, per the host's mode. Auto defers to
@@ -598,65 +629,40 @@ impl Optimizer {
         }
     }
 
-    // Best-of-N over the text proposers, keeping only candidates whose own decode reproduces the block
-    // (reckless-safe per-instance proof) and clear price + detector. Deterministic tie-break so the wire is stable.
+    // Best-of-N over text proposers. Each candidate must pass its codec's byte-exact or semantic
+    // verifier, the price gate, and detector checks. Deterministic ties keep the selected wire stable.
     fn best_proposer(&mut self, raw: &str) -> Option<(String, &'static str, f64, usize)> {
         if !self.proposers_enabled {
             return None;
         }
         let mut best: Option<(String, &'static str, f64, usize)> = None;
         for i in 0..self.text_proposers.len() {
-            let Some(wire) = self.text_proposers[i].encode(raw) else {
-                continue;
-            };
-            if self.text_proposers[i].decode(&wire).as_deref() != Some(raw) {
-                continue; // reckless proposal that does not round-trip: dropped, never shipped
-            }
-            let Verdict::Save { usd } = self.priced(raw, &wire) else {
-                continue;
-            };
-            if !detectorgate::detector_findings(raw, &wire).is_empty() {
-                continue;
-            }
-            let units = self.units(&wire);
             let id = self.text_proposers[i].id();
-            let better = match &best {
-                Some((bw, bid, _, bunits)) => {
-                    units < *bunits
-                        || (units == *bunits && (id, wire.as_str()) < (*bid, bw.as_str()))
+            let candidates = self.text_proposers[i].encode_candidates(raw);
+            for wire in candidates {
+                if !self.text_proposers[i].verify(raw, &wire) {
+                    continue; // semantic or byte-exact proof failed: never ship this candidate
                 }
-                None => true,
-            };
-            if better {
-                best = Some((wire, id, usd, units));
+                let Verdict::Save { usd } = self.priced(raw, &wire) else {
+                    continue;
+                };
+                if !detectorgate::detector_findings(raw, &wire).is_empty() {
+                    continue;
+                }
+                let units = self.units(&wire);
+                let better = match &best {
+                    Some((bw, bid, _, bunits)) => {
+                        units < *bunits
+                            || (units == *bunits && (id, wire.as_str()) < (*bid, bw.as_str()))
+                    }
+                    None => true,
+                };
+                if better {
+                    best = Some((wire, id, usd, units));
+                }
             }
         }
         best
-    }
-
-    // Proposer tier: reached when structured codecs punt. Ships the best proposer unless a
-    // recoverable offload is cheaper.
-    fn try_proposers(&mut self, raw: &str) -> Outcome {
-        if let Some((wire, id, usd, units)) = self.best_proposer(raw) {
-            if self.wants_offload(raw, units)
-                && let out @ Outcome::Offloaded { .. } = self.try_offload(raw)
-            {
-                return out;
-            }
-            let wire_bytes = wire.len();
-            return Outcome::Compressed {
-                wire,
-                transform: id,
-                certificate: Certificate {
-                    clmh_before: clmh::Clmh::default(),
-                    clmh_after: clmh::Clmh::default(),
-                    canonical_bytes: raw.len(),
-                    wire_bytes,
-                },
-                saved_usd: usd,
-            };
-        }
-        self.try_offload(raw)
     }
 
     // Opt-in lossy-but-recoverable prose: coherent summary inline, full original offloaded behind a
