@@ -2,11 +2,14 @@ use std::collections::HashSet;
 
 const HEADER: &str = "SWGRP";
 
-// Readable inline compression for path listings and grep output: lines grouped under each directory,
-// stated once, with the rest (filename, or filename:line:content) listed under it like an outline.
-// A weak model reconstructs by prepending only the short directory (verified across model tiers) --
-// grouping the full path instead defeats reconstruction on weak models. Byte-exact or it declines.
+// Readable inline compression for path listings and grep output. YAML is handled first because it is
+// another structured text surface where repeated keys and indentation dominate tool-output tokens.
+// The YAML codec proves semantic equality itself before this function returns a candidate.
 pub fn encode(raw: &str) -> Option<String> {
+    if let Some(wire) = crate::yaml_condenser::YamlCondenser::encode(raw) {
+        return Some(wire);
+    }
+
     let (body, trailing) = match raw.strip_suffix('\n') {
         Some(b) => (b, true),
         None => (raw, false),
@@ -22,8 +25,6 @@ pub fn encode(raw: &str) -> Option<String> {
     (decode(&wire).as_deref() == Some(raw)).then_some(wire)
 }
 
-// Groups grep `path:line:content` by the path's directory, keeping `filename:line:content` local so
-// the reconstruction is a single directory prepend, which weak models read.
 fn encode_grep_dirs(lines: &[&str], trailing: bool) -> Option<String> {
     if !lines.iter().all(|l| is_grep_shaped(l)) {
         return None;
@@ -56,7 +57,6 @@ fn dir_of(path: &str) -> &str {
     }
 }
 
-// A path with a `:<digits>:` run is grep output, not a listing; grouping it is not weak-model readable.
 fn is_grep_shaped(line: &str) -> bool {
     line.match_indices(':').any(|(i, _)| {
         let rest = &line.as_bytes()[i + 1..];
@@ -75,7 +75,7 @@ fn encode_listing(lines: &[&str], trailing: bool) -> Option<String> {
     }
     let dirs: Vec<&str> = lines.iter().map(|l| dir_of(l)).collect();
     if dirs.iter().collect::<HashSet<_>>().len() == lines.len() {
-        return None; // no repeated directory, grouping saves nothing
+        return None;
     }
     let mut out = format!("{HEADER} {}", trailing as u8);
     let mut cur = "\0";
@@ -119,7 +119,11 @@ mod tests {
 
     fn round_trip(raw: &str) {
         if let Some(wire) = encode(raw) {
-            assert_eq!(decode(&wire).as_deref(), Some(raw), "wire:\n{wire}");
+            if wire.starts_with("SWGRP") {
+                assert_eq!(decode(&wire).as_deref(), Some(raw), "wire:\n{wire}");
+            } else {
+                assert!(crate::yaml_condenser::YamlCondenser::verify(raw, &wire));
+            }
         }
     }
 
@@ -152,5 +156,15 @@ mod tests {
     #[test]
     fn grep_content_with_slashes_uses_the_path_directory() {
         round_trip("src/a.rs:5:let p = \"a/b/c\";\nsrc/a.rs:6:// http://x\nsrc/z.rs:1:ok\n");
+    }
+
+    #[test]
+    fn yaml_uses_the_structured_condenser() {
+        let raw = "# comment\nservices:\n  app:\n    environment:\n      NODE_ENV: production # inline\n      DATABASE_HOST: db\n      AUTH_SECRET: \"a#b\"\n";
+        let wire = encode(raw).unwrap();
+        assert!(wire.starts_with("SWY1\n"));
+        assert!(!wire.contains("comment"));
+        assert!(!wire.contains("inline"));
+        assert!(crate::yaml_condenser::YamlCondenser::verify(raw, &wire));
     }
 }
