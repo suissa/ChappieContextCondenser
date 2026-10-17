@@ -1,0 +1,102 @@
+# Docker Compose sample based on the supplied stack. This is the readable input fixture.
+services:
+  db:
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    container_name: lucy_mae_db
+    command:
+      - postgres
+      - -c
+      - max_connections=200
+      - -c
+      - shared_preload_libraries=age
+    environment:
+      POSTGRES_DB: lucy_mae
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_APP_USER: ${DATABASE_APP_USER:?DATABASE_APP_USER must be set}
+      POSTGRES_APP_PASSWORD: ${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD must be set}
+    ports:
+      - "23452:5432"
+    volumes:
+      - postgres18_data:/var/lib/postgresql
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lucy_mae_app
+    ports:
+      - "${APP_PORT:-3355}:10000"
+    environment:
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: lucy_mae
+      DATABASE_USER: ${DATABASE_APP_USER:?DATABASE_APP_USER must be set}
+      DATABASE_PASSWORD: ${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD must be set}
+      DATABASE_URL: postgresql://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@db:5432/lucy_mae
+      NODE_ENV: production
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      NATS_URL: nats://nats:4222
+      WHATSZAP_API_BASE: http://evolution-go:20001
+      AUDIO2TEXT_URL: ${AUDIO2TEXT_URL:-http://host.docker.internal:20002/transcribe}
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+      evolution-go:
+        condition: service_started
+    restart: unless-stopped
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: lucy_mae_nats
+    command: ["--js"]
+    restart: unless-stopped
+    ports:
+      - "60001:4222"
+    volumes:
+      - nats_data:/data
+
+  evolution-go:
+    image: lucy-mae-evolution-go:local
+    container_name: evolution-go-geoloc
+    restart: unless-stopped
+    ports:
+      - "24000:20001"
+    environment:
+      SERVER_PORT: 20001
+      CLIENT_NAME: "ChappieZap"
+      WEBHOOK_URL: "http://app:10000/whatsapp/webhook"
+      GEOLOCATION_WEBHOOK_URL: "http://app:10000/whatsapp/webhook"
+      GLOBAL_API_KEY: ${EVOLUTION_GLOBAL_API_KEY:?EVOLUTION_GLOBAL_API_KEY must be set}
+      DATABASE_SAVE_MESSAGES: "true"
+      WADEBUG: "INFO"
+      LOGTYPE: "console"
+      CONNECT_ON_STARTUP: "true"
+      WEBHOOK_FILES: "true"
+      AMQP_URL: ""
+      AMQP_GLOBAL_ENABLED: "false"
+      NATS_URL: "nats://nats:4222"
+      NATS_GLOBAL_ENABLED: "false"
+      MINIO_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+
+volumes:
+  nats_data:
+    driver: local
+  postgres18_data:
+    external: true
+    name: lucy-mae_postgres18_data
