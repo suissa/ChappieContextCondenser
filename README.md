@@ -444,3 +444,5 @@ Apache-2.0. See [LICENSE](LICENSE).
 Run `cargo test -p secondwind-optimize --test plugin_genetic_bench -- --nocapture` to compare the baseline, each built-in structured codec, all codec portfolios, and a deterministic genetic search. The GA evaluates each fixture family independently (32 individuals, 24 generations), and the checked-in corpus includes JSON arrays/objects plus YAML, TOML, Markdown, CSV, NDJSON, logs, diffs, source code, and XML. Unsupported formats remain baseline cases rather than being counted as compression wins. See [benchmark methodology](bench/plugins/README.md).
 
 The benchmark reports byte reductions and checks the codec's reconstructed JSON value before accepting a candidate. These fixture results are not production traffic metrics and do not replace the existing real-tokenizer benchmarks.
+
+The genetic winner is then refined by Binary Particle Swarm Optimization (BPSO), with per-file fitness and the exhaustive 32-portfolio result retained as an oracle. BPSO details and its current search-space limits are documented in [the benchmark methodology](bench/plugins/README.md).
