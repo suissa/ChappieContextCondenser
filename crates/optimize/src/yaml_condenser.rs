@@ -219,9 +219,31 @@ fn strip_yaml_comment(s: &str) -> String {
 }
 
 fn has_block_scalar_indicator(line: &str) -> bool {
-    let Some(colon) = find_unquoted_colon(line) else { return false };
-    let value = line[colon + 1..].trim();
-    matches!(value, "|" | ">" | "|-" | "|+" | ">-" | ">+")
+    // A block scalar may be a mapping value ("key: |2-") or a sequence item ("- >+").
+    let candidate = line.strip_prefix("- ").unwrap_or(line).trim_start();
+    let value = if let Some(colon) = find_unquoted_colon(candidate) {
+        candidate[colon + 1..].trim()
+    } else {
+        candidate
+    };
+    let Some(style) = value.chars().next() else { return false };
+    if style != '|' && style != '>' {
+        return false;
+    }
+
+    // YAML permits at most one indentation digit and one chomping indicator, in either order.
+    let mut has_digit = false;
+    let mut has_chomping = false;
+    for ch in value[style.len_utf8()..].chars() {
+        if ch.is_ascii_digit() && !has_digit {
+            has_digit = true;
+        } else if matches!(ch, '+' | '-') && !has_chomping {
+            has_chomping = true;
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -280,6 +302,21 @@ services:
     #[test]
     fn declines_block_scalars_until_their_indentation_is_encoded_safely() {
         assert!(YamlCondenser::encode("a: |\n  hello\nb: 1\n").is_none());
+    }
+
+    #[test]
+    fn declines_indented_and_chomped_block_scalars() {
+        for raw in [
+            "a: |2-\\n  text\\nb: 1\\n",
+            "a: >-\\n  folded text\\nb: 1\\n",
+            "items:\\n  - |+\\n    text\\n  - plain\\n",
+            "items:\\n  - >2\\n    folded\\n  - plain\\n",
+        ] {
+            assert!(
+                YamlCondenser::encode(raw).is_none(),
+                "block scalar form must be declined: {raw:?}"
+            );
+        }
     }
 
     #[test]
