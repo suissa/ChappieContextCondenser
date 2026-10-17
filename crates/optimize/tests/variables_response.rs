@@ -1,6 +1,5 @@
-use secondwind_optimize::{Optimizer, Outcome, variables_simplifier::VariablesSimplifier};
 use serde_json::{Value, json};
-use secondwind_optimize::transform::Transform;
+use secondwind_optimize::{Optimizer, Outcome, transform::Transform, variables_simplifier::VariablesSimplifier};
 
 #[test]
 fn optimizer_restores_variable_aliases_in_model_response() {
@@ -8,10 +7,13 @@ fn optimizer_restores_variable_aliases_in_model_response() {
         {"customerIdentifier":"C123","customerDisplayName":"Ana","accountStatus":"active"},
         {"customerIdentifier":"C456","customerDisplayName":"Bia","accountStatus":"inactive"},
     ]);
-    let encoded = VariablesSimplifier.try_encode(&source).expect("aliases should be profitable to build");
+    let encoded = VariablesSimplifier
+        .try_encode(&source)
+        .expect("aliases should be profitable to build");
 
     let optimizer = Optimizer::default();
-    let response = r#"[{"a":"C999","b":"Carol","c":"active"}]"#;
+    // Deterministic sorted aliases: a=accountStatus, b=customerDisplayName, c=customerIdentifier.
+    let response = r#"[{"a":"active","b":"Carol","c":"C999"}]"#;
     let restored = optimizer
         .restore_model_response("variables-simplifier", &encoded.wire, response)
         .expect("built-in variable transform must expose its response inverse");
@@ -28,21 +30,25 @@ fn optimizer_restores_variable_aliases_in_model_response() {
 }
 
 #[test]
-fn optimizer_does_not_restore_aliases_belonging_to_another_wire() {
+fn optimizer_uses_only_the_dictionary_from_the_exact_wire() {
     let first = json!([{"customerIdentifier":"C123","customerDisplayName":"Ana"}]);
     let second = json!([{"orderIdentifier":"O123","orderDisplayName":"Order"}]);
     let first_wire = VariablesSimplifier.try_encode(&first).unwrap().wire;
     let second_wire = VariablesSimplifier.try_encode(&second).unwrap().wire;
 
     let optimizer = Optimizer::default();
-    let response = r#"{"a":"O999","b":"Other","unrelated":"kept"}"#;
+    // First wire: a=customerDisplayName, b=customerIdentifier.
+    let response = r#"{"a":"Other","b":"C999","unrelated":"kept"}"#;
     let restored = optimizer
         .restore_model_response("variables-simplifier", &first_wire, response)
         .unwrap();
     let value: Value = serde_json::from_str(&restored).unwrap();
 
-    assert_eq!(value["a"], "C999" );
+    assert_eq!(value["customerDisplayName"], "Other");
+    assert_eq!(value["customerIdentifier"], "C999");
     assert_eq!(value["unrelated"], "kept");
+
+    // A different wire has its own dictionary and is therefore restored independently.
     assert!(
         optimizer
             .restore_model_response("variables-simplifier", &second_wire, response)
@@ -53,7 +59,9 @@ fn optimizer_does_not_restore_aliases_belonging_to_another_wire() {
 #[test]
 fn unknown_transform_has_no_response_inverse() {
     let optimizer = Optimizer::default();
-    assert!(optimizer.restore_model_response("unknown", "wire", "{} ").is_none());
+    assert!(optimizer
+        .restore_model_response("unknown", "wire", "{}")
+        .is_none());
 }
 
 #[test]
