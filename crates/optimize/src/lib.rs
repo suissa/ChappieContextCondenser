@@ -45,6 +45,7 @@ pub mod tokens;
 pub mod transform;
 pub mod tree;
 pub mod variables_simplifier;
+pub mod yaml_condenser;
 #[cfg(feature = "treesitter")]
 pub mod treesit;
 
