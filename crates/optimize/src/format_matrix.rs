@@ -1,11 +1,12 @@
 use crate::{
+    dict,
     format_condenser::FormatCondenser,
     lines,
     transform::TextProposer,
     yaml_condenser::YamlCondenser,
 };
 
-const COMPOSITE_HEADER: &str = "SFM1";
+const COMPOSITE_HEADER: &str = "SFM1";\nconst DICT_COMPOSITE_HEADER: &str = "SFM1D";
 
 /// Best-of-N text format matrix. Semantic codecs are attempted for JSON/TOML/YAML; a reversible
 /// repeated-line dictionary is available for CSV, XML, HTML, Markdown, source, logs, and unknown
@@ -32,6 +33,11 @@ impl FormatMatrix {
                 candidates.push((wire, "lines"));
             }
         }
+        if let Some(wire) = dict::encode(raw) {
+            if dict::decode(&wire).as_deref() == Some(raw) {
+                candidates.push((wire, "dict"));
+            }
+        }
 
         // Search compositions, not only standalone encodings. The final optimizer prices each
         // candidate in real model tokens and enforces the shared detector/cost gates.
@@ -43,7 +49,12 @@ impl FormatMatrix {
             let Some(outer) = lines::encode(&inner) else { continue };
             let wire = format!("{COMPOSITE_HEADER}\\n{id}\\n{outer}");
             if FormatMatrix.verify(raw, &wire) {
-                candidates.push((wire, "composed"));
+                candidates.push((wire, "composed-lines"));
+            }
+            let Some(outer) = dict::encode(&inner) else { continue };
+            let wire = format!("{DICT_COMPOSITE_HEADER}\\n{id}\\n{outer}");
+            if FormatMatrix.verify(raw, &wire) {
+                candidates.push((wire, "composed-dict"));
             }
         }
 
@@ -65,6 +76,15 @@ impl TextProposer for FormatMatrix {
     }
 
     fn decode(&self, wire: &str) -> Option<String> {
+        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\\n")) {
+            let (id, outer) = rest.split_once('\\n')?;
+            let inner_wire = dict::decode(outer)?;
+            return match id {
+                "format-condenser" => FormatCondenser.decode(&inner_wire),
+                "yaml-condenser" => YamlCondenser::decode(&inner_wire),
+                _ => None,
+            };
+        }
         if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\\n")) {
             let (id, outer) = rest.split_once('\\n')?;
             let inner_wire = lines::decode(outer)?;
@@ -83,10 +103,22 @@ impl TextProposer for FormatMatrix {
         if wire.starts_with("[lines]\\n") {
             return lines::decode(wire);
         }
+        if wire.starts_with("[dict]\\n") {
+            return dict::decode(wire);
+        }
         None
     }
 
     fn verify(&self, raw: &str, wire: &str) -> bool {
+        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\\n")) {
+            let Some((id, outer)) = rest.split_once('\\n') else { return false };
+            let Some(inner_wire) = dict::decode(outer) else { return false };
+            return match id {
+                "format-condenser" => FormatCondenser.verify(raw, &inner_wire),
+                "yaml-condenser" => YamlCondenser::verify(raw, &inner_wire),
+                _ => false,
+            };
+        }
         if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\\n")) {
             let Some((id, outer)) = rest.split_once('\\n') else { return false };
             let Some(inner_wire) = lines::decode(outer) else { return false };
@@ -104,6 +136,9 @@ impl TextProposer for FormatMatrix {
         }
         if wire.starts_with("[lines]\\n") {
             return lines::decode(wire).as_deref() == Some(raw);
+        }
+        if wire.starts_with("[dict]\\n") {
+            return dict::decode(wire).as_deref() == Some(raw);
         }
         false
     }
