@@ -16,6 +16,8 @@ pub mod dict;
 pub mod distilled;
 pub mod doc;
 pub mod frontier;
+pub mod format_condenser;
+pub mod format_matrix;
 pub mod frontlines;
 pub mod grouped;
 pub mod kv;
@@ -169,9 +171,14 @@ impl Optimizer {
         let counter: Arc<dyn TokenCounter> = Arc::new(ByteCounter);
         Self {
             transforms: Self::built_in_transforms(counter.clone()),
-            // Built-in text codecs are unreadable inline; only host-registered proposers ship here,
-            // and a host owns its codec's readability. See compress_text.
-            text_proposers: Vec::new(),
+            // Built-in semantic and reversible text candidates. The optimizer evaluates all
+            // candidates using its configured token counter and shared admission gates.
+            text_proposers: vec![
+                Box::new(format_matrix::FormatMatrix),
+                Box::new(format_condenser::FormatCondenser),
+                Box::new(yaml_condenser::YamlCondenser),
+                Box::new(lines::Lines),
+            ],
             proposers_enabled: true,
             gate,
             zone,
@@ -606,29 +613,29 @@ impl Optimizer {
         }
         let mut best: Option<(String, &'static str, f64, usize)> = None;
         for i in 0..self.text_proposers.len() {
-            let Some(wire) = self.text_proposers[i].encode(raw) else {
-                continue;
-            };
-            if self.text_proposers[i].decode(&wire).as_deref() != Some(raw) {
-                continue; // reckless proposal that does not round-trip: dropped, never shipped
-            }
-            let Verdict::Save { usd } = self.priced(raw, &wire) else {
-                continue;
-            };
-            if !detectorgate::detector_findings(raw, &wire).is_empty() {
-                continue;
-            }
-            let units = self.units(&wire);
             let id = self.text_proposers[i].id();
-            let better = match &best {
-                Some((bw, bid, _, bunits)) => {
-                    units < *bunits
-                        || (units == *bunits && (id, wire.as_str()) < (*bid, bw.as_str()))
+            let candidates = self.text_proposers[i].encode_candidates(raw);
+            for wire in candidates {
+                if !self.text_proposers[i].verify(raw, &wire) {
+                    continue; // semantic or byte-exact proof failed: never ship this candidate
                 }
-                None => true,
-            };
-            if better {
-                best = Some((wire, id, usd, units));
+                let Verdict::Save { usd } = self.priced(raw, &wire) else {
+                    continue;
+                };
+                if !detectorgate::detector_findings(raw, &wire).is_empty() {
+                    continue;
+                }
+                let units = self.units(&wire);
+                let better = match &best {
+                    Some((bw, bid, _, bunits)) => {
+                        units < *bunits
+                            || (units == *bunits && (id, wire.as_str()) < (*bid, bw.as_str()))
+                    }
+                    None => true,
+                };
+                if better {
+                    best = Some((wire, id, usd, units));
+                }
             }
         }
         best
