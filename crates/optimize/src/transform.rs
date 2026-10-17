@@ -18,6 +18,11 @@ pub trait Transform {
 pub trait TextProposer: Send + Sync {
     fn id(&self) -> &'static str;
     fn encode(&self, raw: &str) -> Option<String>;
+    /// Return multiple valid candidates when a codec can compose strategies. The optimizer prices
+    /// every candidate with its configured tokenizer and selects the lowest-cost verified wire.
+    fn encode_candidates(&self, raw: &str) -> Vec<String> {
+        self.encode(raw).into_iter().collect()
+    }
     fn decode(&self, wire: &str) -> Option<String>;
     fn verify(&self, raw: &str, wire: &str) -> bool {
         self.decode(wire).as_deref() == Some(raw)
