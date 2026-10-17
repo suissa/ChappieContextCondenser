@@ -13,10 +13,8 @@ const COMPOSITE_HEADER: &str = "SFM1";
 /// Every candidate is decoded and verified before it can be returned.
 pub struct FormatMatrix;
 
-impl TextProposer for FormatMatrix {
-    fn id(&self) -> &'static str { "format-matrix" }
-
-    fn encode(&self, raw: &str) -> Option<String> {
+impl FormatMatrix {
+    fn candidates(raw: &str) -> Vec<String> {
         let mut candidates: Vec<(String, &'static str)> = Vec::new();
 
         if let Some(wire) = FormatCondenser.encode(raw) {
@@ -35,8 +33,8 @@ impl TextProposer for FormatMatrix {
             }
         }
 
-        // Composition search: apply the lossless line dictionary to semantic wires. This can
-        // compress repeated structure introduced or retained by a format-specific codec.
+        // Search compositions, not only standalone encodings. The final optimizer prices each
+        // candidate in real model tokens and enforces the shared detector/cost gates.
         let semantic: Vec<(String, &'static str)> = candidates.iter()
             .filter(|(_, id)| *id != "lines")
             .cloned()
@@ -50,7 +48,20 @@ impl TextProposer for FormatMatrix {
         }
 
         candidates.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then(a.1.cmp(b.1)));
-        candidates.into_iter().next().map(|(wire, _)| wire)
+        let mut seen = std::collections::BTreeSet::new();
+        candidates.into_iter().filter_map(|(wire, _)| seen.insert(wire.clone()).then_some(wire)).collect()
+    }
+}
+
+impl TextProposer for FormatMatrix {
+    fn id(&self) -> &'static str { "format-matrix" }
+
+    fn encode(&self, raw: &str) -> Option<String> {
+        Self::candidates(raw).into_iter().next()
+    }
+
+    fn encode_candidates(&self, raw: &str) -> Vec<String> {
+        Self::candidates(raw)
     }
 
     fn decode(&self, wire: &str) -> Option<String> {
