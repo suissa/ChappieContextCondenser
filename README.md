@@ -437,3 +437,10 @@ Apache-2.0. See [LICENSE](LICENSE).
   <br><br>
   <sub>Built by <b>Orchetron</b> · <a href="./CONTRIBUTING.md">Contributing</a> · Apache-2.0</sub>
 </div>
+
+
+## Plugin and genetic benchmark
+
+Run `cargo test -p secondwind-optimize --test plugin_genetic_bench -- --nocapture` to compare the baseline, each built-in structured codec, all codec portfolios, and a deterministic genetic search. The GA evaluates each fixture family independently (32 individuals, 24 generations), and the checked-in corpus includes JSON arrays/objects plus YAML, TOML, Markdown, CSV, NDJSON, logs, diffs, source code, and XML. Unsupported formats remain baseline cases rather than being counted as compression wins. See [benchmark methodology](bench/plugins/README.md).
+
+The benchmark reports byte reductions and checks the codec's reconstructed JSON value before accepting a candidate. These fixture results are not production traffic metrics and do not replace the existing real-tokenizer benchmarks.
