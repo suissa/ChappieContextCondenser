@@ -175,6 +175,74 @@ fn evolve_for(sample: &Sample, plugins: &[Plugin; 5], seed: &mut u64) -> Genome 
     best
 }
 
+
+#[derive(Clone, Copy, Debug)]
+struct Particle {
+    position: u8,
+    velocity: [f64; 5],
+    best_position: u8,
+    best_fitness: i64,
+}
+
+fn sigmoid(x: f64) -> f64 { 1.0 / (1.0 + (-x.clamp(-8.0, 8.0)).exp()) }
+
+// Binary Particle Swarm Optimization (BPSO) refines the genetic algorithm's candidate.
+fn swarm_refine(sample: &Sample, plugins: &[Plugin; 5], seed: &mut u64, ga_seed: Genome) -> Genome {
+    const PARTICLES: usize = 24;
+    const ITERATIONS: usize = 32;
+    const INERTIA: f64 = 0.62;
+    const COGNITIVE: f64 = 1.45;
+    const SOCIAL: f64 = 1.45;
+    let max_mask = (1u8 << plugins.len()) - 1;
+    let mut swarm = Vec::with_capacity(PARTICLES);
+    let mut initial = vec![ga_seed.mask & max_mask];
+    for bit in 0..plugins.len() { initial.push((ga_seed.mask ^ (1 << bit)) & max_mask); }
+    while initial.len() < PARTICLES { initial.push((next(seed) as u8) & max_mask); }
+    for position in initial {
+        swarm.push(Particle {
+            position, velocity: [0.0; 5], best_position: position,
+            best_fitness: fitness(sample, position, plugins),
+        });
+    }
+    let mut global_best = swarm.iter().max_by_key(|p| p.best_fitness)
+        .map(|p| p.best_position).unwrap_or(ga_seed.mask);
+    let mut global_fitness = fitness(sample, global_best, plugins);
+
+    for _ in 0..ITERATIONS {
+        for particle in &mut swarm {
+            for bit in 0..plugins.len() {
+                let current = ((particle.position >> bit) & 1) as f64;
+                let personal = ((particle.best_position >> bit) & 1) as f64;
+                let social = ((global_best >> bit) & 1) as f64;
+                let r1 = next(seed) as f64 / u64::MAX as f64;
+                let r2 = next(seed) as f64 / u64::MAX as f64;
+                particle.velocity[bit] = (INERTIA * particle.velocity[bit]
+                    + COGNITIVE * r1 * (personal - current)
+                    + SOCIAL * r2 * (social - current)).clamp(-6.0, 6.0);
+                if (next(seed) as f64 / u64::MAX as f64) < sigmoid(particle.velocity[bit]) {
+                    particle.position |= 1 << bit;
+                } else {
+                    particle.position &= !(1 << bit);
+                }
+            }
+            particle.position &= max_mask;
+            let score = fitness(sample, particle.position, plugins);
+            if score > particle.best_fitness {
+                particle.best_position = particle.position;
+                particle.best_fitness = score;
+            }
+            if particle.best_fitness > global_fitness {
+                global_best = particle.best_position;
+                global_fitness = particle.best_fitness;
+            }
+        }
+    }
+    // Swarm may improve, but is never allowed to regress from the GA seed.
+    if fitness(sample, global_best, plugins) >= fitness(sample, ga_seed.mask, plugins) {
+        Genome { mask: global_best }
+    } else { ga_seed }
+}
+
 #[test]
 fn benchmark_each_plugin_alone_and_every_combination_per_file_family() {
     let plugins = plugins();
