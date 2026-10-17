@@ -183,7 +183,7 @@ fn benchmark_each_plugin_alone_and_every_combination_per_file_family() {
     let mut results = BTreeMap::new();
     let mut seed = 0x5EC0_2D1A_2026_u64;
 
-    println!("family,baseline_bytes,best_codec,best_bytes,saved_bytes,reduction_pct,ga_mask,exhaustive_mask");
+    println!("family,baseline_bytes,best_codec,best_bytes,saved_bytes,reduction_pct,ga_mask,swarm_mask,exhaustive_mask");
     for sample in &samples {
         // Isolation pass: baseline, every plugin alone, and every plugin combination (2^N masks).
         let mut exhaustive = (0u8..(1u8 << plugins.len()))
@@ -194,17 +194,20 @@ fn benchmark_each_plugin_alone_and_every_combination_per_file_family() {
 
         // A distinct genetic run per file family, rather than one aggregate fitness across files.
         let ga = evolve_for(sample, &plugins, &mut seed);
-        let ga_score = score(sample, ga.mask, &plugins);
+        let swarm = swarm_refine(sample, &plugins, &mut seed, ga);
+        let swarm_score = score(sample, swarm.mask, &plugins);
         let reduction = if sample.raw.is_empty() { 0.0 } else {
-            100.0 * ga_score.saved_bytes as f64 / sample.raw.len() as f64
+            100.0 * swarm_score.saved_bytes as f64 / sample.raw.len() as f64
         };
-        println!("{},{},{},{},{},{:.2},{:#07b},{:#07b}",
-            sample.family, sample.raw.len(), ga_score.codec, ga_score.output_bytes,
-            ga_score.saved_bytes, reduction, ga.mask, exhaustive_mask);
+        println!("{},{},{},{},{},{:.2},{:#07b},{:#07b},{:#07b}",
+            sample.family, sample.raw.len(), swarm_score.codec, swarm_score.output_bytes,
+            swarm_score.saved_bytes, reduction, ga.mask, swarm.mask, exhaustive_mask);
 
-        assert!(ga_score.valid, "GA returned invalid result for {}", sample.family);
-        assert!(ga_score.output_bytes <= sample.raw.len(), "fitness may not reward expansion");
-        results.insert(sample.family, (ga_score.saved_bytes, exhaustive_score.saved_bytes));
+        assert!(swarm_score.valid, "swarm returned invalid result for {}", sample.family);
+        assert!(swarm_score.output_bytes <= sample.raw.len(), "fitness may not reward expansion");
+        assert!(fitness(sample, swarm.mask, &plugins) >= fitness(sample, ga.mask, &plugins),
+            "swarm must not regress from GA candidate for {}", sample.family);
+        results.insert(sample.family, (swarm_score.saved_bytes, exhaustive_score.saved_bytes));
     }
 
     // YAML is also registered as a TextProposer-style plugin. It is checked independently because
