@@ -188,6 +188,14 @@ Drop-in, in-process, lossless. Each is a couple of lines; the binding READMEs ca
 One import and one wrap. Your framework's tool outputs compress losslessly on the way to the
 model, and pass through untouched when they will not shrink.
 
+### YAML Structural Condenser (SWY1)
+
+YAML configuration files can be represented in a model-facing wire that removes recognized comments, encodes next-line indentation as `|N`, and replaces eligible mapping keys with deterministic aliases of up to three characters. The `SWY1` header and JSON dictionary make the representation decodable; a YAML parse-and-compare round trip gates semantic correctness. The optimizer should still require a real net-cost win before selecting it.
+
+SWY1 is a **project-specific format**, not a YAML standard or a ZIP/DEFLATE algorithm. Its ideas come from dictionary encoding, syntax-aware/structural compression, explicit whitespace coding, and reversible round-trip validation. Comments and presentation formatting are not preserved byte-for-byte. Block scalars (`|` / `>`) are declined for safety, and response key restoration is currently an explicit helper rather than automatic proxy behavior.
+
+See [docs/YAML_STRUCTURAL_CONDENSER.md](docs/YAML_STRUCTURAL_CONDENSER.md) for the wire format, algorithm, standards background, safety model, and limitations.
+
 ### VariablesSimplifier (JSON key aliases)
 
 The optimizer also tests a deterministic `variables-simplifier` codec that assigns short (up to three-character) aliases to JSON object keys and includes a reversible dictionary. It is selected only when the normal proof and net-cost gates pass; the dictionary overhead means it is not beneficial for every object. See [docs/VARIABLES_SIMPLIFIER.md](docs/VARIABLES_SIMPLIFIER.md) for the wire format, limits, and tests. This operates on JSON keys, not arbitrary source-code identifiers, and does not rewrite model responses.
