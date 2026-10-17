@@ -281,4 +281,21 @@ services:
     fn declines_block_scalars_until_their_indentation_is_encoded_safely() {
         assert!(YamlCondenser::encode("a: |\n  hello\nb: 1\n").is_none());
     }
+
+    #[test]
+    fn docker_compose_fixture_is_semantically_equivalent_and_reports_sizes() {
+        let raw = include_str!("../../../examples/docker-compose.before.yml");
+        let wire = YamlCondenser::encode(raw)
+            .expect("representative Docker Compose YAML should be encodable");
+        assert!(YamlCondenser::verify(raw, &wire));
+        let before = raw.len();
+        let after = wire.len();
+        let delta = before as isize - after as isize;
+        let pct = delta as f64 * 100.0 / before as f64;
+        eprintln!(
+            "docker-compose YAML condenser: before={before} bytes, after={after} bytes, delta={delta} bytes ({pct:.2}%)"
+        );
+        // The test reports real end-to-end wire size; it intentionally does not assume every
+        // YAML document wins after the alias dictionary/header overhead.
+    }
 }
