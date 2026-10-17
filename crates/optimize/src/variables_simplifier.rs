@@ -75,13 +75,17 @@ fn restore_response_value(value: &Value, dictionary: &Map<String, Value>) -> Opt
             for (key, child) in object {
                 // Only aliases known to this block are restored. Other response keys are preserved.
                 let restored_key = dictionary.get(key).and_then(Value::as_str).unwrap_or(key);
-                if result.insert(restored_key.to_owned(), restore_response_value(child, dictionary)?).is_some() {
+                if result
+                    .insert(restored_key.to_owned(), restore_response_value(child, dictionary)?)
+                    .is_some()
+                {
                     return None;
                 }
             }
             Some(Value::Object(result))
         }
-        Value::Array(items) => items.iter()
+        Value::Array(items) => items
+            .iter()
             .map(|item| restore_response_value(item, dictionary))
             .collect::<Option<Vec<_>>>()
             .map(Value::Array),
@@ -227,6 +231,16 @@ mod tests {
         assert_eq!(first.wire, second.wire);
         let dictionary: Value = serde_json::from_str(first.wire.splitn(3, '\n').nth(1).unwrap()).unwrap();
         assert!(dictionary.as_object().unwrap().keys().all(|key| key.len() <= 3));
+    }
+
+    #[test]
+    fn restores_known_aliases_in_model_response_and_preserves_other_keys() {
+        let source = json!([{"customerIdentifier": "C123", "status": "active"}]);
+        let encoded = VariablesSimplifier.try_encode(&source).unwrap();
+        let response = r#"{"a":"C999","unrelated":"kept"}"#;
+        let restored = restore_response_keys(&encoded.wire, response).unwrap();
+        let value: Value = serde_json::from_str(&restored).unwrap();
+        assert_eq!(value, json!({"customerIdentifier": "C999", "unrelated": "kept"}));
     }
 
     #[test]
