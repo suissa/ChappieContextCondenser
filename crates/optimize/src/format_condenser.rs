@@ -99,7 +99,6 @@ fn compact_json(raw: &str) -> Option<String> {
         return None;
     }
     let value = serde_json::from_str::<Value>(raw).ok()?;
-    let compact = serde_json::to_value(&value).ok()?;
 
     let mut long_keys = BTreeSet::new();
     collect_object_keys(&value, &mut long_keys);
