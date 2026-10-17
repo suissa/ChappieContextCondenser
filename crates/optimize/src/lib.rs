@@ -44,6 +44,7 @@ pub mod text_columnar;
 pub mod tokens;
 pub mod transform;
 pub mod tree;
+pub mod variables_simplifier;
 #[cfg(feature = "treesitter")]
 pub mod treesit;
 
@@ -68,6 +69,7 @@ use norm::Normalize;
 use offload::{OffloadStore, Store};
 use tokens::{ByteCounter, TokenCounter};
 use transform::{Encoded, TextProposer, Transform};
+use variables_simplifier::VariablesSimplifier;
 
 type StructuredCandidate = (String, &'static str, Certificate, f64, usize);
 type StructuredSearch = (Option<StructuredCandidate>, Option<KeptReason>);
@@ -137,7 +139,7 @@ const RELEVANCE_MAX_INLINE: usize = 24;
 
 const PROSE_SUMMARY_MIN_BYTES: usize = 1000;
 const PROSE_SUMMARY_FRACTION: f64 = 0.5;
-const BUILTIN_TRANSFORM_COUNT: usize = 4;
+const BUILTIN_TRANSFORM_COUNT: usize = 5;
 
 pub struct Optimizer {
     transforms: Vec<Box<dyn Transform>>,
@@ -188,7 +190,8 @@ impl Optimizer {
             Box::new(Columnar::with_counter(counter.clone())),
             Box::new(Normalize::with_counter(counter.clone())),
             Box::new(Nested::with_counter(counter.clone())),
-            Box::new(Doc::with_counter(counter)),
+            Box::new(Doc::with_counter(counter.clone())),
+            Box::new(VariablesSimplifier),
         ]
     }
 
