@@ -6,7 +6,8 @@ use crate::{
     yaml_condenser::YamlCondenser,
 };
 
-const COMPOSITE_HEADER: &str = "SFM1";\nconst DICT_COMPOSITE_HEADER: &str = "SFM1D";
+const COMPOSITE_HEADER: &str = "SFM1";
+const DICT_COMPOSITE_HEADER: &str = "SFM1D";
 
 /// Best-of-N text format matrix. Semantic codecs are attempted for JSON/TOML/YAML; a reversible
 /// repeated-line dictionary is available for CSV, XML, HTML, Markdown, source, logs, and unknown
@@ -42,17 +43,17 @@ impl FormatMatrix {
         // Search compositions, not only standalone encodings. The final optimizer prices each
         // candidate in real model tokens and enforces the shared detector/cost gates.
         let semantic: Vec<(String, &'static str)> = candidates.iter()
-            .filter(|(_, id)| *id != "lines")
+            .filter(|(_, id)| *id == "format-condenser" || *id == "yaml-condenser")
             .cloned()
             .collect();
         for (inner, id) in semantic {
             let Some(outer) = lines::encode(&inner) else { continue };
-            let wire = format!("{COMPOSITE_HEADER}\\n{id}\\n{outer}");
+            let wire = format!("{COMPOSITE_HEADER}\n{id}\n{outer}");
             if FormatMatrix.verify(raw, &wire) {
                 candidates.push((wire, "composed-lines"));
             }
             let Some(outer) = dict::encode(&inner) else { continue };
-            let wire = format!("{DICT_COMPOSITE_HEADER}\\n{id}\\n{outer}");
+            let wire = format!("{DICT_COMPOSITE_HEADER}\n{id}\n{outer}");
             if FormatMatrix.verify(raw, &wire) {
                 candidates.push((wire, "composed-dict"));
             }
@@ -76,8 +77,8 @@ impl TextProposer for FormatMatrix {
     }
 
     fn decode(&self, wire: &str) -> Option<String> {
-        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\\n")) {
-            let (id, outer) = rest.split_once('\\n')?;
+        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\n")) {
+            let (id, outer) = rest.split_once('\n')?;
             let inner_wire = dict::decode(outer)?;
             return match id {
                 "format-condenser" => FormatCondenser.decode(&inner_wire),
@@ -85,8 +86,8 @@ impl TextProposer for FormatMatrix {
                 _ => None,
             };
         }
-        if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\\n")) {
-            let (id, outer) = rest.split_once('\\n')?;
+        if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\n")) {
+            let (id, outer) = rest.split_once('\n')?;
             let inner_wire = lines::decode(outer)?;
             return match id {
                 "format-condenser" => FormatCondenser.decode(&inner_wire),
@@ -94,24 +95,24 @@ impl TextProposer for FormatMatrix {
                 _ => None,
             };
         }
-        if wire.starts_with("SJSON1\\n") || wire.starts_with("STOML1\\n") {
+        if wire.starts_with("SJSON1\n") || wire.starts_with("STOML1\n") {
             return FormatCondenser.decode(wire);
         }
-        if wire.starts_with("SWY1\\n") {
+        if wire.starts_with("SWY1\n") {
             return YamlCondenser::decode(wire);
         }
-        if wire.starts_with("[lines]\\n") {
+        if wire.starts_with("[lines]\n") {
             return lines::decode(wire);
         }
-        if wire.starts_with("[dict]\\n") {
+        if wire.starts_with("[dict]\n") {
             return dict::decode(wire);
         }
         None
     }
 
     fn verify(&self, raw: &str, wire: &str) -> bool {
-        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\\n")) {
-            let Some((id, outer)) = rest.split_once('\\n') else { return false };
+        if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\n")) {
+            let Some((id, outer)) = rest.split_once('\n') else { return false };
             let Some(inner_wire) = dict::decode(outer) else { return false };
             return match id {
                 "format-condenser" => FormatCondenser.verify(raw, &inner_wire),
@@ -119,8 +120,8 @@ impl TextProposer for FormatMatrix {
                 _ => false,
             };
         }
-        if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\\n")) {
-            let Some((id, outer)) = rest.split_once('\\n') else { return false };
+        if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\n")) {
+            let Some((id, outer)) = rest.split_once('\n') else { return false };
             let Some(inner_wire) = lines::decode(outer) else { return false };
             return match id {
                 "format-condenser" => FormatCondenser.verify(raw, &inner_wire),
@@ -128,16 +129,16 @@ impl TextProposer for FormatMatrix {
                 _ => false,
             };
         }
-        if wire.starts_with("SJSON1\\n") || wire.starts_with("STOML1\\n") {
+        if wire.starts_with("SJSON1\n") || wire.starts_with("STOML1\n") {
             return FormatCondenser.verify(raw, wire);
         }
-        if wire.starts_with("SWY1\\n") {
+        if wire.starts_with("SWY1\n") {
             return YamlCondenser::verify(raw, wire);
         }
-        if wire.starts_with("[lines]\\n") {
+        if wire.starts_with("[lines]\n") {
             return lines::decode(wire).as_deref() == Some(raw);
         }
-        if wire.starts_with("[dict]\\n") {
+        if wire.starts_with("[dict]\n") {
             return dict::decode(wire).as_deref() == Some(raw);
         }
         false
@@ -153,12 +154,12 @@ mod tests {
     fn lossless_line_codec_covers_generic_target_formats() {
         let c = FormatMatrix;
         let samples = [
-            ("csv", "name,city,status\\nAna,Sao Paulo,active\\nBia,Santos,active\\nCaio,Itarare,active\\n"),
-            ("xml", "<root>\\n  <service name=\\"api\\">\\n    <status>ready</status>\\n  </service>\\n  <service name=\\"web\\">\\n    <status>ready</status>\\n  </service>\\n</root>\\n"),
-            ("html", "<main>\\n  <section class=\\"card\\">\\n    <h2>Title</h2>\\n  </section>\\n  <section class=\\"card\\">\\n    <h2>Title</h2>\\n  </section>\\n</main>\\n"),
-            ("markdown", "## Service\\n\\n- status: ready\\n- status: ready\\n- status: ready\\n"),
-            ("log", "level=INFO service=api status=ready\\nlevel=INFO service=api status=ready\\nlevel=INFO service=api status=ready\\n"),
-            ("source", "function ready() {\\n  return true;\\n}\\nfunction ready() {\\n  return true;\\n}\\n"),
+            ("csv", "name,city,status\nAna,Sao Paulo,active\nBia,Santos,active\nCaio,Itarare,active\n"),
+            ("xml", "<root>\n  <service name=\\"api\\">\n    <status>ready</status>\n  </service>\n  <service name=\\"web\\">\n    <status>ready</status>\n  </service>\n</root>\n"),
+            ("html", "<main>\n  <section class=\\"card\\">\n    <h2>Title</h2>\n  </section>\n  <section class=\\"card\\">\n    <h2>Title</h2>\n  </section>\n</main>\n"),
+            ("markdown", "## Service\n\n- status: ready\n- status: ready\n- status: ready\n"),
+            ("log", "level=INFO service=api status=ready\nlevel=INFO service=api status=ready\nlevel=INFO service=api status=ready\n"),
+            ("source", "function ready() {\n  return true;\n}\nfunction ready() {\n  return true;\n}\n"),
         ];
         for (kind, raw) in samples {
             let wire = c.encode(raw).unwrap_or_else(|| panic!("{kind} sample should have a reversible candidate"));
@@ -189,7 +190,7 @@ mod tests {
     #[test]
     fn unknown_or_malformed_wire_is_rejected() {
         let c = FormatMatrix;
-        assert!(!c.verify("anything", "SFM1\\nunknown\\nwire"));
-        assert!(c.decode("SFM1\\nunknown\\nwire").is_none());
+        assert!(!c.verify("anything", "SFM1\nunknown\nwire"));
+        assert!(c.decode("SFM1\nunknown\nwire").is_none());
     }
 }
