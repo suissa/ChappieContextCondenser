@@ -42,7 +42,7 @@ impl FormatMatrix {
         for (inner, id) in semantic {
             let Some(outer) = lines::encode(&inner) else { continue };
             let wire = format!("{COMPOSITE_HEADER}\\n{id}\\n{outer}");
-            if Self::verify(raw, &wire) {
+            if FormatMatrix.verify(raw, &wire) {
                 candidates.push((wire, "composed"));
             }
         }
