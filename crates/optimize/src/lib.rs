@@ -665,31 +665,6 @@ impl Optimizer {
         best
     }
 
-    // Proposer tier: reached when structured codecs punt. Ships the best proposer unless a
-    // recoverable offload is cheaper.
-    fn try_proposers(&mut self, raw: &str) -> Outcome {
-        if let Some((wire, id, usd, units)) = self.best_proposer(raw) {
-            if self.wants_offload(raw, units)
-                && let out @ Outcome::Offloaded { .. } = self.try_offload(raw)
-            {
-                return out;
-            }
-            let wire_bytes = wire.len();
-            return Outcome::Compressed {
-                wire,
-                transform: id,
-                certificate: Certificate {
-                    clmh_before: clmh::Clmh::default(),
-                    clmh_after: clmh::Clmh::default(),
-                    canonical_bytes: raw.len(),
-                    wire_bytes,
-                },
-                saved_usd: usd,
-            };
-        }
-        self.try_offload(raw)
-    }
-
     // Opt-in lossy-but-recoverable prose: coherent summary inline, full original offloaded behind a
     // marker. Surfaced only when a resolver is present, so without recovery the block stays whole.
     fn try_prose_split(&mut self, raw: &str) -> Option<Outcome> {
