@@ -172,27 +172,27 @@ mod tests {
         let samples = [
             (
                 "csv",
-                r#"name,city,status
-Ana,Sao Paulo,active
-Bia,Santos,active
-Caio,Itarare,active
+                r#"state,state,state
+active,active,active
+active,active,active
+active,active,active
 "#,
             ),
             (
                 "xml",
                 r###"<root>
-  <service name="api"><status>ready</status></service>
-  <service name="web"><status>ready</status></service>
-  <service name="worker"><status>ready</status></service>
+  <status>ready</status>
+  <status>ready</status>
+  <status>ready</status>
 </root>
 "###,
             ),
             (
                 "html",
                 r###"<main>
-  <section class="card"><h2>Title</h2></section>
-  <section class="card"><h2>Title</h2></section>
-  <section class="card"><h2>Title</h2></section>
+  <h2>Title</h2>
+  <h2>Title</h2>
+  <h2>Title</h2>
 </main>
 "###,
             ),
