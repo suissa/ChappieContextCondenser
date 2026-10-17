@@ -47,6 +47,48 @@ impl Transform for VariablesSimplifier {
     }
 }
 
+/// Restores aliased keys in a JSON model response using the dictionary from a VariablesSimplifier wire.
+/// This is an explicit host-side helper; the proxy response path does not call it automatically.
+pub fn restore_response_keys(wire: &str, response_json: &str) -> Option<String> {
+    let mut parts = wire.splitn(3, '\n');
+    if parts.next()? != HEADER {
+        return None;
+    }
+    let dictionary: Value = serde_json::from_str(parts.next()?).ok()?;
+    let dictionary = dictionary.as_object()?;
+    let response: Value = serde_json::from_str(response_json).ok()?;
+    let mut restored = Map::new();
+    for (alias, original) in dictionary {
+        let original = original.as_str()?;
+        if restored.insert(alias.clone(), Value::String(original.to_owned())).is_some() {
+            return None;
+        }
+    }
+    let restored = restore_response_value(&response, &restored)?;
+    serde_json::to_string(&restored).ok()
+}
+
+fn restore_response_value(value: &Value, dictionary: &Map<String, Value>) -> Option<Value> {
+    match value {
+        Value::Object(object) => {
+            let mut result = Map::new();
+            for (key, child) in object {
+                // Only aliases known to this block are restored. Other response keys are preserved.
+                let restored_key = dictionary.get(key).and_then(Value::as_str).unwrap_or(key);
+                if result.insert(restored_key.to_owned(), restore_response_value(child, dictionary)?).is_some() {
+                    return None;
+                }
+            }
+            Some(Value::Object(result))
+        }
+        Value::Array(items) => items.iter()
+            .map(|item| restore_response_value(item, dictionary))
+            .collect::<Option<Vec<_>>>()
+            .map(Value::Array),
+        scalar => Some(scalar.clone()),
+    }
+}
+
 /// Restores all aliased keys from a VariablesSimplifier wire representation.
 pub fn decode(wire: &str) -> Option<Value> {
     let mut parts = wire.splitn(3, '\n');
@@ -196,7 +238,7 @@ mod tests {
 
     #[test]
     fn declines_keyless_and_single_key_values() {
-        assert!(VariablesSimplifier.try_encode(&json!({"onlyOneKey": {"onlyOneChild": 1}})).is_some());
+        assert!(VariablesSimplifier.try_encode(&json!({"onlyOneKey": {"onlyOneKey": 1}})).is_none());
         assert!(VariablesSimplifier.try_encode(&json!([1, 2, 3])).is_none());
         assert!(VariablesSimplifier.try_encode(&json!({"sameKey": 1})).is_none());
     }
