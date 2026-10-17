@@ -1,0 +1,99 @@
+SWY1
+{"0":"services","1":"test","2":"timeout","3":"volumes","a":"./docker/postgres/initdb","b":"AMQP_GLOBAL_ENABLED","c":"AMQP_URL","d":"AUDIO2TEXT_URL","e":"AUTH_REQUIRED","f":"CLIENT_NAME","g":"CONNECT_ON_STARTUP","h":"DATABASE_HOST","i":"DATABASE_NAME","j":"DATABASE_PASSWORD","k":"DATABASE_PORT","l":"DATABASE_SAVE_MESSAGES","m":"DATABASE_URL","n":"DATABASE_USER","o":"GEOLOCATION_WEBHOOK_URL","p":"GLOBAL_API_KEY","q":"LOGTYPE","r":"MINIO_ENABLED","s":"NATS_GLOBAL_ENABLED","t":"NATS_URL","u":"NODE_ENV","v":"POSTGRES_APP_PASSWORD","w":"POSTGRES_APP_USER","x":"POSTGRES_DB","y":"POSTGRES_PASSWORD","z":"POSTGRES_USER","A":"SERVER_PORT","B":"WADEBUG","C":"WEBHOOK_FILES","D":"WEBHOOK_URL","E":"WHATSZAP_API_BASE","F":"build","G":"command","H":"condition","I":"container_name","J":"context","K":"depends_on","L":"dockerfile","M":"driver","N":"environment","O":"evolution-go","P":"external","Q":"healthcheck","R":"image","S":"interval","T":"name","U":"nats","V":"nats_data","W":"ports","X":"postgres18_data","Y":"restart","Z":"retries"}
+0:|2
+db:|4
+F:|6
+J: ./docker/postgres|6
+L: Dockerfile|4
+I: lucy_mae_db|4
+G:|6
+- postgres|6
+- -c|6
+- max_connections=200|6
+- -c|6
+- shared_preload_libraries=age|4
+N:|6
+x: lucy_mae|6
+z: postgres|6
+y: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}|6
+w: ${DATABASE_APP_USER:?DATABASE_APP_USER must be set}|6
+v: ${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD must be set}|4
+W:|6
+- "23452:5432"|4
+3:|6
+- X:/var/lib/postgresql|6
+- a:/docker-entrypoint-initdb.d:ro|4
+Q:|6
+1: ["CMD-SHELL", "pg_isready -U postgres"]|6
+S: 5s|6
+2: 5s|6
+Z: 5|2
+app:|4
+F:|6
+J: .|6
+L: Dockerfile|4
+I: lucy_mae_app|4
+W:|6
+- "${APP_PORT:-3355}:10000"|4
+N:|6
+h: db|6
+k: 5432|6
+i: lucy_mae|6
+n: ${DATABASE_APP_USER:?DATABASE_APP_USER must be set}|6
+j: ${DATABASE_APP_PASSWORD:?DATABASE_APP_PASSWORD must be set}|6
+m: postgresql://${DATABASE_APP_USER}:${DATABASE_APP_PASSWORD}@db:5432/lucy_mae|6
+u: production|6
+e: ${AUTH_REQUIRED:-true}|6
+t: nats://nats:4222|6
+E: http://evolution-go:20001|6
+d: ${AUDIO2TEXT_URL:-http://host.docker.internal:20002/transcribe}|4
+K:|6
+db:|8
+H: service_healthy|6
+U:|8
+H: service_started|6
+O:|8
+H: service_started|4
+Y: unless-stopped|2
+U:|4
+R: nats:2.10-alpine|4
+I: lucy_mae_nats|4
+G: ["--js"]|4
+Y: unless-stopped|4
+W:|6
+- "60001:4222"|4
+3:|6
+- V:/data|2
+O:|4
+R: lucy-mae-evolution-go:local|4
+I: evolution-go-geoloc|4
+Y: unless-stopped|4
+W:|6
+- "24000:20001"|4
+N:|6
+A: 20001|6
+f: "ChappieZap"|6
+D: "http://app:10000/whatsapp/webhook"|6
+o: "http://app:10000/whatsapp/webhook"|6
+p: ${EVOLUTION_GLOBAL_API_KEY:?EVOLUTION_GLOBAL_API_KEY must be set}|6
+l: "true"|6
+B: "INFO"|6
+q: "console"|6
+g: "true"|6
+C: "true"|6
+c: ""|6
+b: "false"|6
+t: "nats://nats:4222"|6
+s: "false"|6
+r: "false"|4
+K:|6
+db:|8
+H: service_healthy|6
+U:|8
+H: service_started|0
+3:|2
+V:|4
+M: local|2
+X:|4
+P: true|4
+T: lucy-mae_postgres18_data|0
