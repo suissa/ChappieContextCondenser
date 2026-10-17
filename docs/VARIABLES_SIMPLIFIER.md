@@ -20,7 +20,7 @@ The dictionary is emitted once per block, so repeated keys across records and ne
 - Duplicate JSON keys are still rejected by the existing input guard.
 - Unknown aliases, malformed dictionaries, and malformed payloads fail decoding instead of guessing.
 
-Use `secondwind_optimize::variables_simplifier::decode(wire)` to decode a wire produced by this codec. The codec is not a source-code variable renamer: it only rewrites JSON object keys. It does not alter arbitrary text, executable code, API schemas, or model responses. A proxy response-path restoration mechanism is not implied by this codec; response bytes remain unchanged, consistent with the proxy's existing contract.
+Use `secondwind_optimize::variables_simplifier::decode(wire)` to decode a wire produced by this codec. The codec is not a source-code variable renamer: it only rewrites JSON object keys. It does not alter arbitrary text, executable code, or API schemas. Hosts that intentionally expect aliased JSON keys in a model response can call `restore_response_keys(wire, response_json)` to restore known aliases explicitly; this helper is not automatically applied by the proxy, whose response bytes remain unchanged.
 
 ## Validation
 
