@@ -9,10 +9,9 @@ use crate::{
 const COMPOSITE_HEADER: &str = "SFM1";
 const DICT_COMPOSITE_HEADER: &str = "SFM1D";
 
-/// Best-of-N text format matrix. Semantic codecs are attempted for JSON/TOML/YAML; a reversible
-/// repeated-line dictionary is available for CSV, XML, HTML, Markdown, source, logs, and unknown
-/// text. Semantic wires are also tried through the line dictionary as a second-stage composition.
-/// Every candidate is decoded and verified before it can be returned.
+/// Best-of-N text format matrix. Semantic codecs are attempted for JSON/TOML/YAML; reversible
+/// repeated-line and repeated-token dictionaries cover CSV, XML, HTML, Markdown, source, logs,
+/// and unknown text. Semantic wires are also tried through both dictionaries as second-stage codecs.
 pub struct FormatMatrix;
 
 impl FormatMatrix {
@@ -40,33 +39,42 @@ impl FormatMatrix {
             }
         }
 
-        // Search compositions, not only standalone encodings. The final optimizer prices each
-        // candidate in real model tokens and enforces the shared detector/cost gates.
-        let semantic: Vec<(String, &'static str)> = candidates.iter()
+        // Composition candidates are independently verified; the optimizer prices all candidates
+        // using its configured tokenizer rather than trusting this byte-length ordering.
+        let semantic: Vec<(String, &'static str)> = candidates
+            .iter()
             .filter(|(_, id)| *id == "format-condenser" || *id == "yaml-condenser")
             .cloned()
             .collect();
+
         for (inner, id) in semantic {
-            let Some(outer) = lines::encode(&inner) else { continue };
-            let wire = format!("{COMPOSITE_HEADER}\n{id}\n{outer}");
-            if FormatMatrix.verify(raw, &wire) {
-                candidates.push((wire, "composed-lines"));
+            if let Some(outer) = lines::encode(&inner) {
+                let wire = format!("{COMPOSITE_HEADER}\n{id}\n{outer}");
+                if FormatMatrix.verify(raw, &wire) {
+                    candidates.push((wire, "composed-lines"));
+                }
             }
-            let Some(outer) = dict::encode(&inner) else { continue };
-            let wire = format!("{DICT_COMPOSITE_HEADER}\n{id}\n{outer}");
-            if FormatMatrix.verify(raw, &wire) {
-                candidates.push((wire, "composed-dict"));
+            if let Some(outer) = dict::encode(&inner) {
+                let wire = format!("{DICT_COMPOSITE_HEADER}\n{id}\n{outer}");
+                if FormatMatrix.verify(raw, &wire) {
+                    candidates.push((wire, "composed-dict"));
+                }
             }
         }
 
         candidates.sort_by(|a, b| a.0.len().cmp(&b.0.len()).then(a.1.cmp(b.1)));
         let mut seen = std::collections::BTreeSet::new();
-        candidates.into_iter().filter_map(|(wire, _)| seen.insert(wire.clone()).then_some(wire)).collect()
+        candidates
+            .into_iter()
+            .filter_map(|(wire, _)| seen.insert(wire.clone()).then_some(wire))
+            .collect()
     }
 }
 
 impl TextProposer for FormatMatrix {
-    fn id(&self) -> &'static str { "format-matrix" }
+    fn id(&self) -> &'static str {
+        "format-matrix"
+    }
 
     fn encode(&self, raw: &str) -> Option<String> {
         Self::candidates(raw).into_iter().next()
@@ -112,8 +120,12 @@ impl TextProposer for FormatMatrix {
 
     fn verify(&self, raw: &str, wire: &str) -> bool {
         if let Some(rest) = wire.strip_prefix(&format!("{DICT_COMPOSITE_HEADER}\n")) {
-            let Some((id, outer)) = rest.split_once('\n') else { return false };
-            let Some(inner_wire) = dict::decode(outer) else { return false };
+            let Some((id, outer)) = rest.split_once('\n') else {
+                return false;
+            };
+            let Some(inner_wire) = dict::decode(outer) else {
+                return false;
+            };
             return match id {
                 "format-condenser" => FormatCondenser.verify(raw, &inner_wire),
                 "yaml-condenser" => YamlCondenser::verify(raw, &inner_wire),
@@ -121,8 +133,12 @@ impl TextProposer for FormatMatrix {
             };
         }
         if let Some(rest) = wire.strip_prefix(&format!("{COMPOSITE_HEADER}\n")) {
-            let Some((id, outer)) = rest.split_once('\n') else { return false };
-            let Some(inner_wire) = lines::decode(outer) else { return false };
+            let Some((id, outer)) = rest.split_once('\n') else {
+                return false;
+            };
+            let Some(inner_wire) = lines::decode(outer) else {
+                return false;
+            };
             return match id {
                 "format-condenser" => FormatCondenser.verify(raw, &inner_wire),
                 "yaml-condenser" => YamlCondenser::verify(raw, &inner_wire),
@@ -151,25 +167,63 @@ mod tests {
     use crate::transform::TextProposer;
 
     #[test]
-    fn lossless_line_codec_covers_generic_target_formats() {
+    fn reversible_codecs_cover_generic_target_formats() {
         let c = FormatMatrix;
         let samples = [
-            ("csv", "name,city,status\nAna,Sao Paulo,active\nBia,Santos,active\nCaio,Itarare,active\n"),
-            ("xml", "<root>\n  <service name=\\"api\\">\n    <status>ready</status>\n  </service>\n  <service name=\\"web\\">\n    <status>ready</status>\n  </service>\n</root>\n"),
-            ("html", "<main>\n  <section class=\\"card\\">\n    <h2>Title</h2>\n  </section>\n  <section class=\\"card\\">\n    <h2>Title</h2>\n  </section>\n</main>\n"),
-            ("markdown", "## Service\n\n- status: ready\n- status: ready\n- status: ready\n"),
-            ("log", "level=INFO service=api status=ready\nlevel=INFO service=api status=ready\nlevel=INFO service=api status=ready\n"),
-            ("source", "function ready() {\n  return true;\n}\nfunction ready() {\n  return true;\n}\n"),
+            (
+                "csv",
+                r#"name,city,status
+Ana,Sao Paulo,active
+Bia,Santos,active
+Caio,Itarare,active
+"#,
+            ),
+            (
+                "xml",
+                r###"<root>
+  <service name="api"><status>ready</status></service>
+  <service name="web"><status>ready</status></service>
+  <service name="worker"><status>ready</status></service>
+</root>
+"###,
+            ),
+            (
+                "html",
+                r###"<main>
+  <section class="card"><h2>Title</h2></section>
+  <section class="card"><h2>Title</h2></section>
+  <section class="card"><h2>Title</h2></section>
+</main>
+"###,
+            ),
+            (
+                "markdown",
+                "## Service\n\n- status: ready\n- status: ready\n- status: ready\n",
+            ),
+            (
+                "log",
+                "level=INFO service=api status=ready\nlevel=INFO service=api status=ready\nlevel=INFO service=api status=ready\n",
+            ),
+            (
+                "source",
+                "function ready() {\n  return true;\n}\nfunction ready() {\n  return true;\n}\nfunction ready() {\n  return true;\n}\n",
+            ),
         ];
         for (kind, raw) in samples {
-            let wire = c.encode(raw).unwrap_or_else(|| panic!("{kind} sample should have a reversible candidate"));
+            let wire = c
+                .encode(raw)
+                .unwrap_or_else(|| panic!("{kind} sample should have a reversible candidate"));
             assert!(c.verify(raw, &wire), "{kind} candidate must verify");
-            assert_eq!(c.decode(&wire).as_deref(), Some(raw), "{kind} must restore byte-exactly");
+            assert_eq!(
+                c.decode(&wire).as_deref(),
+                Some(raw),
+                "{kind} must restore byte-exactly"
+            );
         }
     }
 
     #[test]
-    fn composes_semantic_codec_with_line_dictionary_when_profitable() {
+    fn json_candidate_round_trips_semantically() {
         let raw = r#"{
   "serviceIdentifier": "api",
   "serviceStatus": "ready",
@@ -183,8 +237,10 @@ mod tests {
         let c = FormatMatrix;
         let wire = c.encode(raw).expect("JSON should have a candidate");
         assert!(c.verify(raw, &wire));
-        assert_eq!(serde_json::from_str::<serde_json::Value>(&c.decode(&wire).unwrap()).unwrap(),
-                   serde_json::from_str::<serde_json::Value>(raw).unwrap());
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&c.decode(&wire).unwrap()).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
     }
 
     #[test]
