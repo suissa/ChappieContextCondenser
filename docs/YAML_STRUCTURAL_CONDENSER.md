@@ -63,7 +63,7 @@ The line suffix `|N` means: **the next encoded line starts with N spaces**. It i
 4. Replace eligible mapping keys with their aliases.
 5. Append `|N` to each line, where `N` is the indentation of the next retained line.
 6. Serialize the alias dictionary as JSON and prepend the `SWY1` header.
-7. Decode the candidate and parse both source and decoded output. Return the candidate only when the resulting YAML data models compare equal. The optimizer's outer net-cost gate should then ensure the representation is actually cheaper before selecting it.
+7. Decode the candidate and parse both source and decoded output. Return the candidate only when the resulting YAML data models compare equal. The optimizer uses the codec's `verify` contract (semantic equality for YAML, byte equality for ordinary text codecs) and its outer net-cost gate before selecting it. SWY1 is registered as a built-in text proposer, so YAML-shaped tool output can use it without host-side registration; it is still skipped whenever the complete wire is not cheaper or fails a guard.
 
 ## Decoding and response restoration
 

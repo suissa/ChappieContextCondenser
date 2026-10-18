@@ -19,6 +19,7 @@ pub mod frontier;
 pub mod format_condenser;
 pub mod format_matrix;
 pub mod frontlines;
+pub mod format_condenser;
 pub mod grouped;
 pub mod kv;
 pub mod lines;
@@ -58,7 +59,7 @@ pub use atom::canonicalize;
 pub fn proof(raw: &str) -> (u64, String) {
     let atoms = serde_json::from_str::<Value>(raw)
         .map(|value| atom::leaves(&value).len() as u64)
-        .unwrap_or_else(|_| raw.split_whitespace().count() as u64);
+        .unwrap_or_else(|| raw.split_whitespace().count() as u64);
     (atoms, certificate::certify(raw).hash)
 }
 
@@ -100,21 +101,17 @@ pub enum KeptReason {
     Refused(&'static str, Refusal),
     NoNetSaving(netcost::Reason),
     DetectorFired,
-    // Duplicate JSON keys: ambiguous, so kept verbatim rather than compressed.
     DuplicateKeys,
 }
 
 impl KeptReason {
-    // Stable slug for the ledger's refused/kept-by-reason breakdown.
     pub fn as_str(&self) -> &'static str {
         match self {
             KeptReason::NotApplicable => "not_applicable",
             KeptReason::Refused(_, Refusal::ClmhMismatch) => "refused_clmh",
             KeptReason::Refused(_, Refusal::InverseWitnessFailed) => "refused_witness",
             KeptReason::Refused(_, Refusal::NotIdempotent) => "refused_idempotency",
-            KeptReason::NoNetSaving(netcost::Reason::FrozenWriteWouldExceedRead) => {
-                "no_saving_frozen"
-            }
+            KeptReason::NoNetSaving(netcost::Reason::FrozenWriteWouldExceedRead) => "no_saving_frozen",
             KeptReason::NoNetSaving(netcost::Reason::NotWorthIt) => "no_saving_notworth",
             KeptReason::NoNetSaving(netcost::Reason::UnknownModel) => "no_saving_unknown_model",
             KeptReason::DetectorFired => "detector",
@@ -123,32 +120,18 @@ impl KeptReason {
     }
 }
 
-// Host control over recoverable eviction. Auto is the cost model: offload only when a content-covering
-// preview makes it genuinely cheaper. Off never evicts (no resolver, or the block must stay in-window).
-// Always evicts every offloadable block regardless of cost, for agents that will resolve on demand.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum OffloadMode {
-    Off,
-    #[default]
-    Auto,
-    Always,
-}
+pub enum OffloadMode { Off, #[default] Auto, Always }
 
-// Expected fraction of an offloaded block the agent pulls back via resolve; inline wins when its
-// factored size beats stub + REOPEN_PRIOR * body. Measured 0.45 over 1055 real traces (2229 offloads).
 const REOPEN_PRIOR: f64 = 0.45;
-
 const RELEVANCE_MIN_ROWS: usize = 8;
 const RELEVANCE_MAX_INLINE: usize = 24;
-
 const PROSE_SUMMARY_MIN_BYTES: usize = 1000;
 const PROSE_SUMMARY_FRACTION: f64 = 0.5;
 const BUILTIN_TRANSFORM_COUNT: usize = 5;
 
 pub struct Optimizer {
     transforms: Vec<Box<dyn Transform>>,
-    // Text codecs searched best-of-N and proven per-instance (decode == raw) before a block falls
-    // to offload. Built-ins and any host-registered codec share the same proof gate.
     text_proposers: Vec<Box<dyn TextProposer>>,
     proposers_enabled: bool,
     gate: NetCostGate,
@@ -162,9 +145,7 @@ pub struct Optimizer {
 }
 
 impl Default for Optimizer {
-    fn default() -> Self {
-        Self::new(NetCostGate::new("claude-sonnet-4-5", 1), Zone::Suffix)
-    }
+    fn default() -> Self { Self::new(NetCostGate::new("claude-sonnet-4-5", 1), Zone::Suffix) }
 }
 
 impl Optimizer {
@@ -193,160 +174,8 @@ impl Optimizer {
         }
     }
 
-    // Keep all built-in structured codecs on the same token counter. Custom transforms remain
-    // appended after this fixed prefix and retain their own construction/configuration.
     fn built_in_transforms(counter: Arc<dyn TokenCounter>) -> Vec<Box<dyn Transform>> {
-        vec![
-            Box::new(Columnar::with_counter(counter.clone())),
-            Box::new(Normalize::with_counter(counter.clone())),
-            Box::new(Nested::with_counter(counter.clone())),
-            Box::new(Doc::with_counter(counter.clone())),
-            Box::new(VariablesSimplifier),
-        ]
-    }
-
-    // Pick how recoverable eviction competes with inline: Off, Auto (cost model), or Always.
-    pub fn set_offload_mode(&mut self, mode: OffloadMode) {
-        self.offload_mode = mode;
-    }
-
-    pub fn offload_mode(&self) -> OffloadMode {
-        self.offload_mode
-    }
-
-    // Off means no recoverable eviction on any path, so every direct-offload strategy (repeat dedup,
-    // relevance split, prose split) checks this before touching the store.
-    fn eviction_off(&self) -> bool {
-        matches!(self.offload_mode, OffloadMode::Off)
-    }
-
-    // Compat shim: false means no resolver is present, so never offload (Off); true restores the
-    // Auto cost model. A host wanting forced eviction calls set_offload_mode(Always) directly.
-    pub fn set_offload_allowed(&mut self, allowed: bool) {
-        self.offload_mode = if allowed {
-            OffloadMode::Auto
-        } else {
-            OffloadMode::Off
-        };
-    }
-
-    // Swap the baked-in relevance embedder for a stronger backend.
-    pub fn with_embedder(mut self, embedder: Arc<dyn relevance::Embedder>) -> Self {
-        self.embedder = embedder;
-        self
-    }
-
-    // The model whose rates price every saving.
-    pub fn model(&self) -> &str {
-        self.gate.model()
-    }
-
-    // Price against the given model. Unknown name is ignored (keeps the configured default) rather
-    // than refusing every block as unpriced.
-    pub fn set_model(&mut self, model: &str) {
-        if secondwind_ledger::rates_for(model).is_some() {
-            self.gate.set_model(model);
-        }
-    }
-
-    pub fn with_model(mut self, model: &str) -> Self {
-        self.set_model(model);
-        self
-    }
-
-    // Opt-in lossy-but-recoverable prose summary inline. Off by default (the lossless path runs otherwise).
-    pub fn with_prose_mode(mut self, on: bool) -> Self {
-        self.prose_mode = on;
-        self
-    }
-
-    pub fn with_prose_shrinker(mut self, shrinker: Arc<dyn prose::ProseShrinker>) -> Self {
-        self.prose_shrinker = Some(shrinker);
-        self.prose_mode = true;
-        self
-    }
-
-    // Switch the pipeline from the default byte proxy to a real token counter, so codec selection
-    // and every gate decision optimize token cost.
-    pub fn with_counter(mut self, counter: Arc<dyn TokenCounter>) -> Self {
-        // Rebuild the fixed built-in prefix without disturbing host transforms appended after it.
-        for (slot, transform) in Self::built_in_transforms(counter.clone())
-            .into_iter()
-            .enumerate()
-        {
-            self.transforms[slot] = transform;
-        }
-        debug_assert!(self.transforms.len() >= BUILTIN_TRANSFORM_COUNT);
-        self.counter = counter;
-        self
-    }
-
-    // Custom transform, tried after the built-ins. Passes the same lossless + net-cost gate, so a
-    // lossy or unprofitable one is refused, never shipped.
-    pub fn with_transform(mut self, transform: Box<dyn Transform>) -> Self {
-        self.transforms.push(transform);
-        self
-    }
-
-    // Host-supplied text codec, searched best-of-N alongside the built-ins. decode(encode(raw)) == raw
-    // proven per-instance, so even a reckless codec is dropped on a wrong round-trip, never shipped.
-    pub fn with_text_proposer(mut self, proposer: Box<dyn TextProposer>) -> Self {
-        self.text_proposers.push(proposer);
-        self
-    }
-
-    // Toggle the best-of-N proposer search (on by default). A cost/latency preference, not a safety
-    // switch (proposals are proven lossless); off, punted blocks fall straight to offload/verbatim.
-    pub fn set_proposers_enabled(&mut self, enabled: bool) {
-        self.proposers_enabled = enabled;
-    }
-
-    // Back the offload store with any resolvable backend (default local disk; Store::persistent for a
-    // durable TTL-bounded dir; a shared OffloadStore backend for multi-instance).
-    pub fn with_store(mut self, store: impl OffloadStore + 'static) -> Self {
-        self.store = Arc::new(store);
-        self
-    }
-
-    // A fleet-shared store: built once, handed to every per-request optimizer as a cheap Arc clone.
-    pub fn with_shared_store(mut self, store: Arc<dyn OffloadStore>) -> Self {
-        self.store = store;
-        self
-    }
-
-    fn priced(&self, before: &str, after: &str) -> Verdict {
-        if self.counter.native() {
-            self.gate.score_tokens(
-                self.zone,
-                self.counter.count(before),
-                self.counter.count(after),
-            )
-        } else {
-            self.gate.score(self.zone, before.len(), after.len())
-        }
-    }
-
-    // Configured unit for a string: tokens when a tokenizer is set, else bytes. Public so a proxy
-    // reports savings in the unit the gate priced.
-    pub fn count(&self, text: &str) -> usize {
-        self.counter.count(text)
-    }
-
-    // Net saving of before to after through the pipeline's gate, None if it does not clear.
-    pub fn saving_usd(&self, before: &str, after: &str) -> Option<f64> {
-        match self.priced(before, after) {
-            Verdict::Save { usd } => Some(usd),
-            Verdict::Refuse(_) => None,
-        }
-    }
-
-    // The unit the pipeline optimizes: tokens when a tokenizer is set, else bytes.
-    fn units(&self, text: &str) -> usize {
-        if self.counter.native() {
-            self.counter.count(text)
-        } else {
-            text.len()
-        }
+        vec![Box::new(Columnar::with_counter(counter.clone())), Box::new(Normalize::with_counter(counter.clone())), Box::new(Nested::with_counter(counter.clone())), Box::new(Doc::with_counter(counter.clone())), Box::new(VariablesSimplifier)]
     }
 
     // Query-aware: keep the rows a request is about inline, offload the rest recoverably.
