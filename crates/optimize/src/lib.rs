@@ -359,7 +359,11 @@ impl Optimizer {
         wire: &str,
         response_json: &str,
     ) -> Option<String> {
-        let transform = self.transforms.iter().find(|candidate| candidate.id() == transform_id)?;
+        serde_json::from_str::<Value>(response_json).ok()?;
+        let transform = self
+            .transforms
+            .iter()
+            .find(|candidate| candidate.id() == transform_id)?;
         transform.restore_response(wire, response_json)
     }
 
