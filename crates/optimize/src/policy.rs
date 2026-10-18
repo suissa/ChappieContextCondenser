@@ -5,11 +5,13 @@
 //! those measurements to the objective.
 
 use crate::swarm::{BinarySwarm, BinarySwarmConfig, BinarySwarmResult};
+use serde::{Deserialize, Serialize};
 
 pub const POLICY_SCHEMA_VERSION: u16 = 1;
 pub const POLICY_GENOME_BITS: usize = 9;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum FileKind {
     Json, Yaml, Toml, Csv, Xml, Html, Markdown, Source, Logs, Unknown,
 }
@@ -25,7 +27,8 @@ impl FileKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CodecFamily {
     FormatCondenser, YamlCondenser, Lines, Dictionary,
 }
@@ -52,7 +55,8 @@ impl CodecFamily {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CodecPolicy {
     pub schema_version: u16,
     pub file_kind: FileKind,
