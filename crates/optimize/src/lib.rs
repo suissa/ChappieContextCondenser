@@ -364,7 +364,9 @@ impl Optimizer {
             .transforms
             .iter()
             .find(|candidate| candidate.id() == transform_id)?;
-        transform.restore_response(wire, response_json)
+        let restored = transform.restore_response(wire, response_json)?;
+        serde_json::from_str::<Value>(&restored).ok()?;
+        Some(restored)
     }
 
     // Query-aware: keep the rows a request is about inline, offload the rest recoverably.
