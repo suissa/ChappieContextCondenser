@@ -45,10 +45,14 @@ impl Transform for VariablesSimplifier {
         let decoded = decode(&wire)?;
         Some(Encoded { wire, decoded })
     }
+
+    fn restore_response(&self, wire: &str, response_json: &str) -> Option<String> {
+        restore_response_keys(wire, response_json)
+    }
 }
 
 /// Restores aliased keys in a JSON model response using the dictionary from a VariablesSimplifier wire.
-/// This is an explicit host-side helper; the proxy response path does not call it automatically.
+/// Unknown response keys are preserved; only aliases belonging to this exact wire are rewritten.
 pub fn restore_response_keys(wire: &str, response_json: &str) -> Option<String> {
     let mut parts = wire.splitn(3, '\n');
     if parts.next()? != HEADER {
@@ -238,7 +242,9 @@ mod tests {
         let source = json!([{"customerIdentifier": "C123", "status": "active"}]);
         let encoded = VariablesSimplifier.try_encode(&source).unwrap();
         let response = r#"{"a":"C999","unrelated":"kept"}"#;
-        let restored = restore_response_keys(&encoded.wire, response).unwrap();
+        let restored = VariablesSimplifier
+            .restore_response(&encoded.wire, response)
+            .unwrap();
         let value: Value = serde_json::from_str(&restored).unwrap();
         assert_eq!(value, json!({"customerIdentifier": "C999", "unrelated": "kept"}));
     }

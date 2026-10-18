@@ -11,6 +11,13 @@ pub trait Transform {
     fn trusted(&self) -> bool {
         false
     }
+
+    /// Optional response-side inverse for transforms that intentionally change model-facing names.
+    /// The host passes the exact wire sent to the model and the model's JSON response; implementations
+    /// restore only aliases belonging to that wire. The default is no-op.
+    fn restore_response(&self, _wire: &str, _response_json: &str) -> Option<String> {
+        None
+    }
 }
 
 // Text codecs prove their reconstruction. The default is byte equality; semantic formats such as
@@ -18,6 +25,11 @@ pub trait Transform {
 pub trait TextProposer: Send + Sync {
     fn id(&self) -> &'static str;
     fn encode(&self, raw: &str) -> Option<String>;
+    /// Return multiple valid candidates when a codec can compose strategies. The optimizer prices
+    /// every candidate with its configured tokenizer and selects the lowest-cost verified wire.
+    fn encode_candidates(&self, raw: &str) -> Vec<String> {
+        self.encode(raw).into_iter().collect()
+    }
     fn decode(&self, wire: &str) -> Option<String>;
     fn verify(&self, raw: &str, wire: &str) -> bool {
         self.decode(wire).as_deref() == Some(raw)
