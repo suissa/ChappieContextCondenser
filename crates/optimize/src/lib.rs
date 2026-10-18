@@ -348,6 +348,27 @@ impl Optimizer {
         }
     }
 
+    /// Restore a model JSON response using the exact request wire and transform that produced it.
+    ///
+    /// This is deliberately opt-in: the proxy response path stays byte-faithful by default.
+    /// Hosts that use a response-transforming codec can call this after receiving a complete JSON
+    /// response. Unknown transform IDs, malformed wires, or invalid response JSON return `None`.
+    pub fn restore_model_response(
+        &self,
+        transform_id: &str,
+        wire: &str,
+        response_json: &str,
+    ) -> Option<String> {
+        serde_json::from_str::<Value>(response_json).ok()?;
+        let transform = self
+            .transforms
+            .iter()
+            .find(|candidate| candidate.id() == transform_id)?;
+        let restored = transform.restore_response(wire, response_json)?;
+        serde_json::from_str::<Value>(&restored).ok()?;
+        Some(restored)
+    }
+
     // Query-aware: keep the rows a request is about inline, offload the rest recoverably.
     pub fn compress_block_with_query(&mut self, raw: &str, query: &str) -> Outcome {
         if let Some(outcome) = self.try_relevance_split(raw, query) {
