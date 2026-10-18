@@ -40,6 +40,7 @@ pub mod resolve;
 pub mod richness;
 pub mod search;
 pub mod select;
+pub mod swarm;
 pub mod shape;
 pub mod shred;
 pub mod text_columnar;
