@@ -218,7 +218,6 @@ impl Optimizer {
     fn eviction_off(&self) -> bool {
         matches!(self.offload_mode, OffloadMode::Off)
     }
-
     // Compat shim: false means no resolver is present, so never offload (Off); true restores the
     // Auto cost model. A host wanting forced eviction calls set_offload_mode(Always) directly.
     pub fn set_offload_allowed(&mut self, allowed: bool) {
@@ -348,6 +347,21 @@ impl Optimizer {
         }
     }
 
+    /// Restore a model JSON response using the exact request wire and transform that produced it.
+    ///
+    /// This is deliberately opt-in: the proxy response path stays byte-faithful by default.
+    /// Hosts that use a response-transforming codec can call this after receiving a complete JSON
+    /// response. Unknown transform IDs, malformed wires, or invalid response JSON return `None`.
+    pub fn restore_model_response(
+        &self,
+        transform_id: &str,
+        wire: &str,
+        response_json: &str,
+    ) -> Option<String> {
+        let transform = self.transforms.iter().find(|candidate| candidate.id() == transform_id)?;
+        transform.restore_response(wire, response_json)
+    }
+
     // Query-aware: keep the rows a request is about inline, offload the rest recoverably.
     pub fn compress_block_with_query(&mut self, raw: &str, query: &str) -> Outcome {
         if let Some(outcome) = self.try_relevance_split(raw, query) {
@@ -437,8 +451,7 @@ impl Optimizer {
         let Ok(value) = serde_json::from_str::<Value>(raw) else {
             if self.prose_mode
                 && let Some(outcome) = self
-                    .try_prose_shrink(raw)
-                    .or_else(|| self.try_prose_split(raw))
+                    .try_prose_shrink(raw)                    .or_else(|| self.try_prose_split(raw))
             {
                 return outcome;
             }
@@ -657,8 +670,7 @@ impl Optimizer {
                     }
                     None => true,
                 };
-                if better {
-                    best = Some((wire, id, usd, units));
+                if better {                    best = Some((wire, id, usd, units));
                 }
             }
         }
@@ -877,8 +889,7 @@ mod tests {
             );
         }
 
-        eprintln!("\n=== stage breakdown on a 200-row block (mean us/call) ===");
-        let raw = block(200);
+        eprintln!("\n=== stage breakdown on a 200-row block (mean us/call) ===");        let raw = block(200);
         let value: Value = serde_json::from_str(&raw).unwrap();
         let opt = mk();
         let m = 1500;
@@ -1098,7 +1109,6 @@ mod tests {
             "without a resolver the offload path is a no-op, block kept whole"
         );
     }
-
     #[test]
     fn a_duplicate_key_block_is_kept_verbatim_not_compressed() {
         // Each row has a duplicate "amount" key; last-wins would drop 100, so keep the block whole.
