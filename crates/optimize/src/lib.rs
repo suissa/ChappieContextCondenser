@@ -218,6 +218,7 @@ impl Optimizer {
     fn eviction_off(&self) -> bool {
         matches!(self.offload_mode, OffloadMode::Off)
     }
+
     // Compat shim: false means no resolver is present, so never offload (Off); true restores the
     // Auto cost model. A host wanting forced eviction calls set_offload_mode(Always) directly.
     pub fn set_offload_allowed(&mut self, allowed: bool) {
@@ -451,7 +452,8 @@ impl Optimizer {
         let Ok(value) = serde_json::from_str::<Value>(raw) else {
             if self.prose_mode
                 && let Some(outcome) = self
-                    .try_prose_shrink(raw)                    .or_else(|| self.try_prose_split(raw))
+                    .try_prose_shrink(raw)
+                    .or_else(|| self.try_prose_split(raw))
             {
                 return outcome;
             }
@@ -670,7 +672,8 @@ impl Optimizer {
                     }
                     None => true,
                 };
-                if better {                    best = Some((wire, id, usd, units));
+                if better {
+                    best = Some((wire, id, usd, units));
                 }
             }
         }
@@ -889,7 +892,8 @@ mod tests {
             );
         }
 
-        eprintln!("\n=== stage breakdown on a 200-row block (mean us/call) ===");        let raw = block(200);
+        eprintln!("\n=== stage breakdown on a 200-row block (mean us/call) ===");
+        let raw = block(200);
         let value: Value = serde_json::from_str(&raw).unwrap();
         let opt = mk();
         let m = 1500;
@@ -1109,6 +1113,7 @@ mod tests {
             "without a resolver the offload path is a no-op, block kept whole"
         );
     }
+
     #[test]
     fn a_duplicate_key_block_is_kept_verbatim_not_compressed() {
         // Each row has a duplicate "amount" key; last-wins would drop 100, so keep the block whole.
