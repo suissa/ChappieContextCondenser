@@ -113,11 +113,11 @@ fn codec_path(wire: &str) -> Option<Vec<CodecFamily>> {
     }
     if let Some(rest) = wire.strip_prefix("SFM1\n") {
         let (id, _) = rest.split_once('\n')?;
-        return Some(vec![parse_codec(id)?]);
+        return Some(vec![parse_codec(id)?, CodecFamily::Lines]);
     }
     if let Some(rest) = wire.strip_prefix("SFM1D\n") {
         let (id, _) = rest.split_once('\n')?;
-        return Some(vec![parse_codec(id)?]);
+        return Some(vec![parse_codec(id)?, CodecFamily::Dictionary]);
     }
     if wire.starts_with("SJSON1\n") || wire.starts_with("STOML1\n") {
         return Some(vec![CodecFamily::FormatCondenser]);
