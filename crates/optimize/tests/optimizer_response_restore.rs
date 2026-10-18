@@ -1,7 +1,5 @@
 use secondwind_optimize::{
-    Optimizer,
-    transform::Transform,
-    variables_simplifier::VariablesSimplifier,
+    transform::Transform, variables_simplifier::VariablesSimplifier, Optimizer,
 };
 use serde_json::{Value, json};
 
