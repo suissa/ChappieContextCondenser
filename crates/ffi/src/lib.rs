@@ -317,10 +317,10 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
                 .copied()
                 .find(|wire| certificate::verify(wire, &Certificate { hash: block.cert.clone() }))
                 .map(|wire| json!({
-                    "key": block.key,
-                    "hash": block.cert,
+                    "key": block.key.as_str(),
+                    "hash": block.cert.as_str(),
                     "wire": wire,
-                    "transform": block.transform,
+                    "transform": block.transform.as_str(),
                 }))
         })
         .collect();
@@ -557,6 +557,13 @@ mod tests {
             proof["wire"].as_str().unwrap(),
             &Certificate { hash: proof["hash"].as_str().unwrap().to_string() }
         ));
+        assert!(
+            !certificate::verify(
+                "tampered wire",
+                &Certificate { hash: proof["hash"].as_str().unwrap().to_string() }
+            ),
+            "a proof must not accept a wire that does not reconstruct the certified block"
+        );
         let tool = out["request"]["messages"][1]["content"].as_str().unwrap();
         assert!(tool.len() < ls.len(), "the tool output must shrink");
         assert_eq!(
