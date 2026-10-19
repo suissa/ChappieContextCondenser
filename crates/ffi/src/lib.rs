@@ -376,7 +376,9 @@ fn proof_records(
             (Value::Array(before_items), Value::Array(after_items))
                 if before_items.len() == after_items.len() =>
             {
-                for (index, (before_item, after_item)) in before_items.iter().zip(after_items).enumerate() {
+                for (index, (before_item, after_item)) in
+                    before_items.iter().zip(after_items).enumerate()
+                {
                     walk(before_item, after_item, &format!("{path}/{index}"), stats, out);
                 }
             }
@@ -642,7 +644,7 @@ mod tests {
         assert_eq!(proof["path"], "/messages/1/content");
         let wire = proof["wire"].as_str().unwrap();
         let hash = proof["hash"].as_str().unwrap();
-        let verify_request = json!({"wire": wire, "hash": hash}).to_string();
+        let verify_request = json!({ "wire": wire, "hash": hash }).to_string();
         let mut verify_len = 0usize;
         let verify_ptr = sw_verify(
             verify_request.as_ptr(),
