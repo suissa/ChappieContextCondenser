@@ -338,7 +338,11 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
 
 // Pair the original and emitted JSON trees so each certificate is bound to the exact
 // changed tool-output leaf, rather than searching arbitrary strings in the request.
-fn proof_records(original: &Value, rewritten: &Value, stats: &[secondwind_optimize::proxy::BlockStat]) -> Vec<Value> {
+fn proof_records(
+    original: &Value,
+    rewritten: &Value,
+    stats: &[secondwind_optimize::proxy::BlockStat],
+) -> Vec<Value> {
     fn walk(
         before: &Value,
         after: &Value,
@@ -349,8 +353,16 @@ fn proof_records(original: &Value, rewritten: &Value, stats: &[secondwind_optimi
         match (before, after) {
             (Value::String(raw), Value::String(wire)) if raw != wire => {
                 let key = blake3::hash(raw.as_bytes()).to_hex()[..16].to_string();
-                if let Some(block) = stats.iter().find(|s| s.key == key && s.kept_reason.is_empty() && !s.cert.is_empty()) {
-                    if certificate::verify(wire, &Certificate { hash: block.cert.clone() }) {
+                if let Some(block) = stats
+                    .iter()
+                    .find(|s| s.key == key && s.kept_reason.is_empty() && !s.cert.is_empty())
+                {
+                    if certificate::verify(
+                        wire,
+                        &Certificate {
+                            hash: block.cert.clone(),
+                        },
+                    ) {
                         out.push(json!({
                             "key": block.key,
                             "hash": block.cert,
@@ -361,16 +373,26 @@ fn proof_records(original: &Value, rewritten: &Value, stats: &[secondwind_optimi
                     }
                 }
             }
-            (Value::Array(before_items), Value::Array(after_items)) if before_items.len() == after_items.len() => {
+            (Value::Array(before_items), Value::Array(after_items))
+                if before_items.len() == after_items.len() =>
+            {
                 for (index, (before_item, after_item)) in before_items.iter().zip(after_items).enumerate() {
                     walk(before_item, after_item, &format!("{path}/{index}"), stats, out);
                 }
             }
-            (Value::Object(before_fields), Value::Object(after_fields)) if before_fields.len() == after_fields.len() => {
+            (Value::Object(before_fields), Value::Object(after_fields))
+                if before_fields.len() == after_fields.len() =>
+            {
                 for (key, before_value) in before_fields {
                     if let Some(after_value) = after_fields.get(key) {
                         let escaped = key.replace('~', "~0").replace('/', "~1");
-                        walk(before_value, after_value, &format!("{path}/{escaped}"), stats, out);
+                        walk(
+                        before_value,
+                        after_value,
+                        &format!("{path}/{escaped}"),
+                        stats,
+                        out,
+                    );
                     }
                 }
             }
@@ -606,10 +628,11 @@ mod tests {
         let request = json!({
             "model": "gpt-4o",
             "messages": [
-                {"role":"user","content":"list files"},
-                {"role":"tool","tool_call_id":"c1","content":raw},
+                { "role": "user", "content": "list files" },
+                { "role": "tool", "tool_call_id": "c1", "content": raw },
             ],
-        }).to_string();
+        })
+        .to_string();
         let mut output_len = 0usize;
         let output_ptr = sw_rewrite(session, request.as_ptr(), request.len(), &mut output_len);
         assert!(!output_ptr.is_null(), "sw_rewrite must return an owned envelope");
@@ -629,9 +652,9 @@ mod tests {
         assert!(!verify_ptr.is_null());
         let verify_bytes = unsafe { slice::from_raw_parts(verify_ptr, verify_len) };
         let verdict: Value = serde_json::from_slice(verify_bytes).unwrap();
-        assert_eq!(verdict["ok"], true);
+        assert!(verdict["ok"].as_bool().unwrap());
 
-        let tampered_request = json!({"wire": "tampered", "hash": hash}).to_string();
+        let tampered_request = json!({ "wire": "tampered", "hash": hash }).to_string();
         let mut tampered_len = 0usize;
         let tampered_ptr = sw_verify(
             tampered_request.as_ptr(),
@@ -641,7 +664,7 @@ mod tests {
         assert!(!tampered_ptr.is_null());
         let tampered_bytes = unsafe { slice::from_raw_parts(tampered_ptr, tampered_len) };
         let tampered_verdict: Value = serde_json::from_slice(tampered_bytes).unwrap();
-        assert_eq!(tampered_verdict["ok"], false);
+        assert!(!tampered_verdict["ok"].as_bool().unwrap());
 
         sw_free(verify_ptr, verify_len);
         sw_free(tampered_ptr, tampered_len);
