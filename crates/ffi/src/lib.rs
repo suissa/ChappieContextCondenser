@@ -279,51 +279,14 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
         optimizer.set_model(&model);
     }
     session.freeze.bound(FREEZE_CAP, SEEN_CAP);
+    let original_body = body.clone();
     let stats = rewrite(
         &mut body,
         &mut optimizer,
         session.resolver.as_deref(),
         &session.freeze,
     );
-
-    // Build portable proof records from the exact string leaves emitted in the rewritten request.
-    // A stat is not itself proof: only include a record when the emitted wire independently verifies
-    // against the certificate for that original block. This deliberately fails closed for unmatched
-    // or kept blocks, and preserves ABI v1 by adding an optional field to the response envelope.
-    fn string_leaves<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
-        match value {
-            Value::String(s) => out.push(s),
-            Value::Array(items) => {
-                for item in items {
-                    string_leaves(item, out);
-                }
-            }
-            Value::Object(fields) => {
-                for item in fields.values() {
-                    string_leaves(item, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut emitted_wires = Vec::new();
-    string_leaves(&body, &mut emitted_wires);
-    let proofs: Vec<Value> = stats
-        .iter()
-        .filter(|block| block.kept_reason.is_empty() && !block.cert.is_empty())
-        .filter_map(|block| {
-            emitted_wires
-                .iter()
-                .copied()
-                .find(|wire| certificate::verify(wire, &Certificate { hash: block.cert.clone() }))
-                .map(|wire| json!({
-                    "key": block.key.as_str(),
-                    "hash": block.cert.as_str(),
-                    "wire": wire,
-                    "transform": block.transform.as_str(),
-                }))
-        })
-        .collect();
+    let proofs = proof_records(&original_body, &body, &stats);
 
     // Only a block's first sight books a row, matching the proxy, so a resend is never re-counted.
     if let Some(home) = &session.home {
@@ -371,6 +334,53 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
         },
     })
     .to_string()
+}
+
+// Pair the original and emitted JSON trees so each certificate is bound to the exact
+// changed tool-output leaf, rather than searching arbitrary strings in the request.
+fn proof_records(original: &Value, rewritten: &Value, stats: &[secondwind_optimize::proxy::BlockStat]) -> Vec<Value> {
+    fn walk(
+        before: &Value,
+        after: &Value,
+        path: &str,
+        stats: &[secondwind_optimize::proxy::BlockStat],
+        out: &mut Vec<Value>,
+    ) {
+        match (before, after) {
+            (Value::String(raw), Value::String(wire)) if raw != wire => {
+                let key = blake3::hash(raw.as_bytes()).to_hex()[..16].to_string();
+                if let Some(block) = stats.iter().find(|s| s.key == key && s.kept_reason.is_empty() && !s.cert.is_empty()) {
+                    if certificate::verify(wire, &Certificate { hash: block.cert.clone() }) {
+                        out.push(json!({
+                            "key": block.key,
+                            "hash": block.cert,
+                            "wire": wire,
+                            "transform": block.transform,
+                            "path": path,
+                        }));
+                    }
+                }
+            }
+            (Value::Array(before_items), Value::Array(after_items)) if before_items.len() == after_items.len() => {
+                for (index, (before_item, after_item)) in before_items.iter().zip(after_items).enumerate() {
+                    walk(before_item, after_item, &format!("{path}/{index}"), stats, out);
+                }
+            }
+            (Value::Object(before_fields), Value::Object(after_fields)) if before_fields.len() == after_fields.len() => {
+                for (key, before_value) in before_fields {
+                    if let Some(after_value) = after_fields.get(key) {
+                        let escaped = key.replace('~', "~0").replace('/', "~1");
+                        walk(before_value, after_value, &format!("{path}/{escaped}"), stats, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut proofs = Vec::new();
+    walk(original, rewritten, "", stats, &mut proofs);
+    proofs
 }
 
 /// Allocate `len` zeroed library-owned bytes (null if `len` is 0), released with sw_free. Exists for
@@ -551,6 +561,8 @@ mod tests {
         assert_eq!(out["stats"]["blocks_rewritten"], 1);
         assert_eq!(out["stats"]["transforms"][0], "nested");
         assert_eq!(out["stats"]["proofs"].as_array().unwrap().len(), 1);
+        assert_eq!(out["stats"]["proofs"][0]["path"], "/messages/1/content");
+        assert_eq!(out["stats"]["proofs"][0]["key"], blake3::hash(ls.as_bytes()).to_hex()[..16].to_string());
         let proof = &out["stats"]["proofs"][0];
         assert_eq!(proof["hash"], certificate::certify(&ls).hash);
         assert!(certificate::verify(
