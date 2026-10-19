@@ -286,6 +286,45 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
         &session.freeze,
     );
 
+    // Build portable proof records from the exact string leaves emitted in the rewritten request.
+    // A stat is not itself proof: only include a record when the emitted wire independently verifies
+    // against the certificate for that original block. This deliberately fails closed for unmatched
+    // or kept blocks, and preserves ABI v1 by adding an optional field to the response envelope.
+    fn string_leaves<'a>(value: &'a Value, out: &mut Vec<&'a str>) {
+        match value {
+            Value::String(s) => out.push(s),
+            Value::Array(items) => {
+                for item in items {
+                    string_leaves(item, out);
+                }
+            }
+            Value::Object(fields) => {
+                for item in fields.values() {
+                    string_leaves(item, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut emitted_wires = Vec::new();
+    string_leaves(&body, &mut emitted_wires);
+    let proofs: Vec<Value> = stats
+        .iter()
+        .filter(|block| block.kept_reason.is_empty() && !block.cert.is_empty())
+        .filter_map(|block| {
+            emitted_wires
+                .iter()
+                .copied()
+                .find(|wire| certificate::verify(wire, &Certificate { hash: block.cert.clone() }))
+                .map(|wire| json!({
+                    "key": block.key,
+                    "hash": block.cert,
+                    "wire": wire,
+                    "transform": block.transform,
+                }))
+        })
+        .collect();
+
     // Only a block's first sight books a row, matching the proxy, so a resend is never re-counted.
     if let Some(home) = &session.home {
         for block in stats.iter().filter(|s| s.first_seen) {
@@ -328,6 +367,7 @@ fn rewrite_request(session: *mut Session, input: Option<&[u8]>) -> String {
             "output_tokens": output_tokens,
             "tokens_saved": input_tokens.saturating_sub(output_tokens),
             "transforms": compressed.map(|s| s.transform.as_str()).collect::<Vec<_>>(),
+            "proofs": proofs,
         },
     })
     .to_string()
@@ -510,6 +550,13 @@ mod tests {
             serde_json::from_str(&rewrite_request(session, Some(request.as_bytes()))).unwrap();
         assert_eq!(out["stats"]["blocks_rewritten"], 1);
         assert_eq!(out["stats"]["transforms"][0], "nested");
+        assert_eq!(out["stats"]["proofs"].as_array().unwrap().len(), 1);
+        let proof = &out["stats"]["proofs"][0];
+        assert_eq!(proof["hash"], certificate::certify(&ls).hash);
+        assert!(certificate::verify(
+            proof["wire"].as_str().unwrap(),
+            &Certificate { hash: proof["hash"].as_str().unwrap().to_string() }
+        ));
         let tool = out["request"]["messages"][1]["content"].as_str().unwrap();
         assert!(tool.len() < ls.len(), "the tool output must shrink");
         assert_eq!(
