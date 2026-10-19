@@ -587,6 +587,69 @@ mod tests {
     }
 
     #[test]
+    fn native_abi_rewrite_proof_round_trips_through_sw_verify() {
+        let session = Box::into_raw(Box::new(Session {
+            freeze: FreezeState::default(),
+            store: Arc::new(Store::default()),
+            resolver: None,
+            home: None,
+            proposers: true,
+            codec: None,
+        }));
+        let raw: String = format!(
+            "[{}]",
+            (0..40)
+                .map(|i| format!(r#"{{"id":{i},"path":"file-{i}.txt","state":"open"}}"#))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let request = json!({
+            "model": "gpt-4o",
+            "messages": [
+                {"role":"user","content":"list files"},
+                {"role":"tool","tool_call_id":"c1","content":raw},
+            ],
+        }).to_string();
+        let mut output_len = 0usize;
+        let output_ptr = sw_rewrite(session, request.as_ptr(), request.len(), &mut output_len);
+        assert!(!output_ptr.is_null(), "sw_rewrite must return an owned envelope");
+        let output_bytes = unsafe { slice::from_raw_parts(output_ptr, output_len) };
+        let output: Value = serde_json::from_slice(output_bytes).unwrap();
+        let proof = &output["stats"]["proofs"][0];
+        assert_eq!(proof["path"], "/messages/1/content");
+        let wire = proof["wire"].as_str().unwrap();
+        let hash = proof["hash"].as_str().unwrap();
+        let verify_request = json!({"wire": wire, "hash": hash}).to_string();
+        let mut verify_len = 0usize;
+        let verify_ptr = sw_verify(
+            verify_request.as_ptr(),
+            verify_request.len(),
+            &mut verify_len,
+        );
+        assert!(!verify_ptr.is_null());
+        let verify_bytes = unsafe { slice::from_raw_parts(verify_ptr, verify_len) };
+        let verdict: Value = serde_json::from_slice(verify_bytes).unwrap();
+        assert_eq!(verdict["ok"], true);
+
+        let tampered_request = json!({"wire": "tampered", "hash": hash}).to_string();
+        let mut tampered_len = 0usize;
+        let tampered_ptr = sw_verify(
+            tampered_request.as_ptr(),
+            tampered_request.len(),
+            &mut tampered_len,
+        );
+        assert!(!tampered_ptr.is_null());
+        let tampered_bytes = unsafe { slice::from_raw_parts(tampered_ptr, tampered_len) };
+        let tampered_verdict: Value = serde_json::from_slice(tampered_bytes).unwrap();
+        assert_eq!(tampered_verdict["ok"], false);
+
+        sw_free(verify_ptr, verify_len);
+        sw_free(tampered_ptr, tampered_len);
+        sw_free(output_ptr, output_len);
+        unsafe { drop(Box::from_raw(session)) };
+    }
+
+    #[test]
     fn a_resend_through_a_session_is_byte_identical_and_counted_once() {
         // Prompt-cache safety: the same request rewritten twice through one session must re-emit
         // byte-identical bytes (so the provider's cached prefix holds) and never re-book the block.
